@@ -5,8 +5,8 @@ S3 Bucket Uploading service
 """
 
 from fastapi import UploadFile
-from .s3_client import get_s3_client
-from .config import settings
+from ..clients.s3_client import get_s3_client
+
 class BaseUploaderService:
     def __init__(self, bucket):
         self.bucket = bucket

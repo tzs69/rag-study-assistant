@@ -2,7 +2,7 @@
 from fastapi import FastAPI, UploadFile, File
 from fastapi import HTTPException
 from src.aws.config import settings
-from src.aws.s3_uploader_service import S3DocUploaderService
+from src.aws.services.s3_uploader_service import S3DocUploaderService
 
 app = FastAPI()
 uploader = S3DocUploaderService(settings.S3_BUCKET_NAME)

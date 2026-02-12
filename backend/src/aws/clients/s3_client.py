@@ -1,20 +1,14 @@
 import asyncio
 import logging
-import os
 from functools import lru_cache
 from typing import Any, Dict, List
 
-import boto3
-from botocore.exceptions import ClientError
-
-from .config import settings
+from ..session import get_aws_session
 
 @lru_cache(maxsize=1)
 def _get_s3_client():
     """Create a cached boto3 session configured from env/settings (profile/region)."""
-    profile = settings.AWS_PROFILE
-    region = settings.AWS_REGION
-    session = boto3.Session(profile_name=profile, region_name=region)
+    session = get_aws_session()
     return session.client("s3")
 
 
