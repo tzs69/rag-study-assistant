@@ -1,0 +1,32 @@
+# Example SAM parameter overrides for dev
+# Copy these values into `sam deploy --guided` prompts or `samconfig.toml`.
+# Note: The template prefixes most resources with `${ProjectName}-${EnvironmentName}-`,
+# so these are suffix/base names (not fully prefixed names).
+
+ProjectName=rag-study-assistant
+EnvironmentName=dev
+AwsRegion=ap-southeast-1
+PythonRuntime=python3.12
+
+S3GeneralPurposeBucketName=document-upload-sam
+RawPrefix=raws
+ChunksPrefix=chunks
+S3VectorBucketName=vector-store-sam
+S3VectorIndexName=chunk-embeddings-vector-index-sam
+
+DynamoManifestTableName=document-vector-manifest-sam
+
+IngestionQueueName=ingest-queue-sam
+IngestionDlqName=ingest-dlq-sam
+DeletionQueueName=delete-queue-sam
+DeletionDlqName=delete-dlq-sam
+QueueVisibilityTimeoutSeconds=360
+
+IngestionFunctionName=ingestion-worker-sam
+DeletionFunctionName=deletion-worker-sam
+
+ChunkingModelId=amazon.titan-embed-text-v2:0
+EmbeddingModelId=amazon.titan-embed-text-v2:0
+
+LambdaMemorySize=1024
+LambdaTimeoutSeconds=180

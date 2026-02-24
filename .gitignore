@@ -45,3 +45,8 @@ next-env.d.ts
 
 # typescript declaration files
 *.d.ts
+
+# aws sam build artifacts and sam config file (not example)
+.aws-sam/
+infra/.aws-sam/
+infra/samconfig.toml
