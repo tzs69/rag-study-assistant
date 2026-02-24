@@ -5,7 +5,7 @@ from typing import Any
 
 from langchain_experimental.text_splitter import SemanticChunker
 from ..clients.bedrock_client import BedrockClient
-
+from .document_reader_service import DocumentText
 
 
 @dataclass(frozen=True)
@@ -16,17 +16,22 @@ class Chunk:
 
 
 class SemanticChunkingService:
-    """Semantic chunker using aws bedrock models."""
+    """
+    Semantic chunker using aws bedrock models.
+    """
 
-    def __init__(self, embedding_model_id: str) -> None:
-        self.bedrock_embedding_model = BedrockClient(embedding_model_id)
-        self.chunker = SemanticChunker(self.bedrock_embedding_model)
+    def __init__(self, chunking_llm_model_id: str) -> None:
+        self.chunking_llm_model = BedrockClient(chunking_llm_model_id)
+        self.chunker = SemanticChunker(self.chunking_llm_model)
 
-    def build_semantic_chunks_from_doctext(self, doc_id: str, text: str) -> list[Chunk]:
+    def build_semantic_chunks_from_doctext(self, doctext: DocumentText) -> list[Chunk]:
         """
-            Generate deterministic semantic chunks from raw document text
-            and return chunk objects with stable chunk ID
+            Processes a single DocumentText object
+            and returns context-aware Chunk objects
         """
+        doctext_processed = self._process_document_text(doctext)
+        doc_id, text = doctext_processed['doc_id'], doctext_processed['text']
+
         if not doc_id:
             raise ValueError("doc_id is required")
 
@@ -53,13 +58,28 @@ class SemanticChunkingService:
         return chunks_list
 
     @staticmethod
+    def _process_document_text(doctext: DocumentText) -> dict[str, Any]:
+        """
+            Checks that DocumentText object contains doc_id and text fields
+            and return them inside a dict format
+        """
+        processed = dict()
+        try:
+            processed['doc_id'] = doctext.doc_id
+            processed['text'] = doctext.text
+            return processed
+        
+        except AttributeError as e:
+            raise
+
+    @staticmethod
     def _normalize_text(text: str) -> str:
         return " ".join((text or "").split())
 
     def _semantic_chunking_helper(self, text: str) -> list[str]:
         """
-            Delegate to LangChain SemanticChunker 
-            to split normalized text into semantically coherent chunk strings
+        Delegate to LangChain SemanticChunker 
+        to split normalized text into semantically coherent chunk strings
         """
         return self.chunker.split_text(text)
 

@@ -17,7 +17,9 @@ def dotenv_exists(env_filename: str = ".env.local") -> bool:
 class Settings(BaseSettings):
     AWS_PROFILE: str
     AWS_REGION: str
-    S3_BUCKET_NAME: str
+    S3_GP_BUCKET_NAME: str
+    S3_GP_RAW_PREFIX: str = "raws"
+    S3_GP_CHUNK_PREFIC: str = "chunks"
 
     model_config = ConfigDict(
         env_file=ENV_FILE_PATH,

@@ -96,7 +96,7 @@ An S3 event-driven design is simpler operationally at scale:
       +--> (currently stops here; no auto processing)
 
 
-                    PROPOSED EVENT PIPELINE
+                    PROPOSED REMAINING EVENT PIPELINE
 
 [Raw Document S3 Bucket]
       |

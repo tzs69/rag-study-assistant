@@ -5,7 +5,7 @@ from io import BytesIO
 from pathlib import PurePosixPath
 
 from botocore.exceptions import ClientError, ParamValidationError
-from ..clients.s3_client import S3Client
+from ..clients.s3_client import S3ClientModular
 
 from pypdf import PdfReader
 from docx import Document as DocxDocument
@@ -31,7 +31,7 @@ class DocumentReaderService:
 
     def __init__(self, bucket_name: str) -> None:
         self.bucket = bucket_name
-        self.s3_client = S3Client(bucket_name)
+        self.s3_client = S3ClientModular(bucket_name, vectors=False)
 
     def read_document_from_s3(self, doc_id: str) -> DocumentText:
         """
