@@ -45,3 +45,4 @@ next-env.d.ts
 
 # typescript declaration files
 *.d.ts
+/infra/
