@@ -93,14 +93,7 @@ An S3 event-driven design is simpler operationally at scale:
       v
 [Raw Document S3 Bucket]
       |
-      +--> (currently stops here; no auto processing)
-
-
-                    PROPOSED REMAINING EVENT PIPELINE
-
-[Raw Document S3 Bucket]
-      |
-      | ObjectCreated:* event (optional prefix/suffix filters)
+      | ObjectCreated:* event 
       v
 [S3 Event Notification]
       |
@@ -109,16 +102,18 @@ An S3 event-driven design is simpler operationally at scale:
       |
       v
 [Ingestion Worker]
+      | 
+      | (For a single document)
       |
-      +--> Parse and validate event payload
-      +--> Idempotency check (bucket + key + version/etag)
-      +--> Download document from S3
-      +--> Extract text
-      +--> Chunk document
-      +--> Generate embeddings (Bedrock)
-      +--> Upsert vectors into vector store
-      +--> Persist indexing status/metadata
-      +--> Ack queue message on success
+      1 --> Parse event payload and perform basic envelope validation
+      2 --> Claim ingestion event 
+      3 --> Read document from S3
+      4 --> Chunk document
+      5 --> Upload chunks as json into S3
+        --> Generate embeddings on Chunks (Bedrock)
+      6 --> Upsert vectors into S3 vector store
+      7 --> Finalize ingestion event: persist indexing status/metadata
+        --> On success, SQS ack is handled by the Lambda event source mapping
 
 (Query path, downstream)
 [Retriever] -> [Vector Store] -> [LLM answer synthesis]
@@ -145,7 +140,7 @@ An S3 event-driven design is simpler operationally at scale:
 
 ## Proposed Responsibilities By Stage
 
-### Stage 1: Upload (already implemented)
+### Stage 1: Upload 
 
 - Keep upload endpoint thin and synchronous.
 - Responsibility is only to accept files and place them in S3 reliably.
@@ -193,10 +188,6 @@ Worker should be a pure orchestrator with clear substeps:
 7. State tracking
 - Record status transitions: `received -> processing -> indexed`.
 - On failure: `failed` plus error class and retry count.
-
-8. Message acknowledgment
-- Ack/delete message only after end-to-end success.
-- Leave unacked on transient failure to trigger retry.
 
 ### Stage 4: Document deletion handling (manifest-based)
 

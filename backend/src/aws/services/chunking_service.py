@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from langchain_experimental.text_splitter import SemanticChunker
+from langchain_aws.embeddings.bedrock import BedrockEmbeddings
 from ..clients.bedrock_client import BedrockClient
 from .document_reader_service import DocumentText
 
@@ -21,29 +22,36 @@ class SemanticChunkingService:
     """
 
     def __init__(self, chunking_llm_model_id: str) -> None:
-        self.chunking_llm_model = BedrockClient(chunking_llm_model_id)
-        self.chunker = SemanticChunker(self.chunking_llm_model)
+        bedrock = BedrockClient(chunking_llm_model_id)
+        self.embeddings_model = BedrockEmbeddings(
+            client=bedrock.client,
+            model_id=bedrock.model_id,
+        )
+        self.chunker = SemanticChunker(self.embeddings_model)
 
     def build_semantic_chunks_from_doctext(self, doctext: DocumentText) -> list[Chunk]:
         """
             Processes a single DocumentText object
             and returns context-aware Chunk objects
         """
-        doctext_processed = self._process_document_text(doctext)
+        doctext_processed = self._validate_document_text(doctext)
         doc_id, text = doctext_processed['doc_id'], doctext_processed['text']
 
         if not doc_id:
             raise ValueError("doc_id is required")
 
+        # Text pre-processing
         cleaned = self._normalize_text(text)
         if not cleaned:
             return []
 
-        # Call helper function
-        cleaned_split: list[str] = self._semantic_chunking_helper(cleaned)
+        # Chunk processed text
+        cleaned_split: list[str] = self.chunker.split_text(cleaned)
 
+        # Build list of Chunk objects to be passed as input to 
+        #   A) Chunk uploader service 
+        #   B) Embedding service
         chunks_list: list[Chunk] = []
-
         for idx, chunk_str in enumerate(cleaned_split):
             chunk_id = f"{doc_id}#{idx + 1:04d}"
 
@@ -58,7 +66,7 @@ class SemanticChunkingService:
         return chunks_list
 
     @staticmethod
-    def _process_document_text(doctext: DocumentText) -> dict[str, Any]:
+    def _validate_document_text(doctext: DocumentText) -> dict[str, Any]:
         """
             Checks that DocumentText object contains doc_id and text fields
             and return them inside a dict format
@@ -75,13 +83,6 @@ class SemanticChunkingService:
     @staticmethod
     def _normalize_text(text: str) -> str:
         return " ".join((text or "").split())
-
-    def _semantic_chunking_helper(self, text: str) -> list[str]:
-        """
-        Delegate to LangChain SemanticChunker 
-        to split normalized text into semantically coherent chunk strings
-        """
-        return self.chunker.split_text(text)
 
 
 def chunks_to_vector_records(chunks_list: list[Chunk]) -> list[dict[str, Any]]:

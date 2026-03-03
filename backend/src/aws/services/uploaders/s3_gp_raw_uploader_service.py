@@ -2,19 +2,16 @@
 S3 gp bucket raw document uploading service
  - S3DocUploaderService: into general purpose document store 
 """
-
 from fastapi import UploadFile
 from pathlib import PurePosixPath
 from typing import Any, List
+import uuid
 
 from .s3_base_uploader import BaseUploader
 
 
 class S3GPRawUploaderService(BaseUploader):
-    """
-    Uploads raw document into GP bucket as is
-    """
-
+    
     def __init__(self, bucket: str, raw_prefix: str = "raws"):
         
         super().__init__(bucket, vectors=False)
@@ -24,7 +21,9 @@ class S3GPRawUploaderService(BaseUploader):
         self.raw_prefix = normalized
 
     async def upload_docs_async(self, files: List[UploadFile]):
-
+        """
+        Uploads raw document into GP bucket as is
+        """
         uploaded = []
         for f in files:
 
@@ -41,9 +40,15 @@ class S3GPRawUploaderService(BaseUploader):
                 Key=key,
                 Body=data,
                 ContentType=f.content_type or "application/octet-stream",
+                Metadata={"original_filename": filename}
             )
             uploaded.append({"name": filename, "key": key, "size": len(data)})
         return uploaded
 
     def _build_raw_key(self, filename: str) -> str:
-        return f"{self.raw_prefix}/{filename}"
+        """Builds the S3 key for the raw document, using the raw_prefix and a unique identifier to avoid collisions."""
+        unique_id = str(uuid.uuid4())
+        filepath = PurePosixPath(filename)
+        stem = filepath.stem
+        extension = filepath.suffix
+        return f"{self.raw_prefix}/{stem}-{unique_id}{extension}"

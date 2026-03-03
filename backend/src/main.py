@@ -1,8 +1,8 @@
 # backend/src/main.py
 from fastapi import FastAPI, UploadFile, File
 from fastapi import HTTPException
-from aws.config import settings
-from aws.services.uploaders.s3_gp_raw_uploader_service import S3GPRawUploaderService
+from .aws.config import settings
+from .aws.services.uploaders.s3_gp_raw_uploader_service import S3GPRawUploaderService
 
 app = FastAPI()
 rawdoc_uploader = S3GPRawUploaderService(

@@ -10,7 +10,6 @@ from .s3_base_uploader import BaseUploader
 
 
 class S3GPChunkUploaderService(BaseUploader):
-    """Uploads one document's chunks as a JSONL object into the GP bucket."""
 
     def __init__(self, bucket: str, chunks_prefix: str = "chunks"):
         super().__init__(bucket, vectors=False)
@@ -19,11 +18,10 @@ class S3GPChunkUploaderService(BaseUploader):
             raise ValueError("chunks_prefix must be a non-empty path segment")
         self.chunks_prefix = normalized
 
-    def upload_chunks_jsonl(
-        self,
-        doc_id: str,
-        chunks: List[Chunk],
-    ) -> dict[str, Any]:
+    def upload_chunks_jsonl(self, doc_id: str, chunks: List[Chunk],) -> dict[str, Any]:
+        """
+        Uploads a document's chunks as a JSONL object to the configured S3 bucket
+        """
         if not doc_id:
             raise ValueError("doc_id is required")
         if not chunks:
@@ -31,7 +29,6 @@ class S3GPChunkUploaderService(BaseUploader):
 
         key = self._build_chunks_key(doc_id)
         body = self._to_jsonl_bytes(chunks)
-
         self.s3.client.put_object(
             Bucket=self.bucket,
             Key=key,
@@ -47,6 +44,9 @@ class S3GPChunkUploaderService(BaseUploader):
         }
 
     def _build_chunks_key(self, doc_id: str) -> str:
+        """
+        Build the S3 object key for a document's chunk JSONL artifact
+        """
         doc_name = PurePosixPath(doc_id).stem
         if not doc_name:
             raise ValueError(f"Cannot derive document name from doc_id: {doc_id}")
@@ -54,6 +54,9 @@ class S3GPChunkUploaderService(BaseUploader):
 
     @staticmethod
     def _to_jsonl_bytes(chunks: List[Chunk]) -> bytes:
+        """
+        Serialize a list of Chunk objects into UTF-8 encoded JSONL bytes
+        """
         lines = []
         for chunk in chunks:
             if isinstance(chunk, Chunk):

@@ -15,15 +15,15 @@ class S3VectorUploaderService(BaseUploader):
         self,
         vector_records_list: List[VectorRecord],
         index_name: str,
-        size_threshold: int, # Minimally above 100 for efficiency 
+        vector_list_size_threshold: int, # Minimally above 100 for efficiency 
         batch_size_divisor: int,
     ):
         if not vector_records_list:
             raise ValueError("vector_records_list cannot be empty")
 
         # Check that size_treshold above 100 (no point batching small inputs)
-        if size_threshold <= 200:
-            raise ValueError("size_treshold must be greater than 200")
+        if vector_list_size_threshold <200:
+            raise ValueError("size_treshold must be greater than or equal to 200")
 
         if batch_size_divisor <= 1:
             raise ValueError("batch_size_divisor must be > 1")
@@ -36,7 +36,7 @@ class S3VectorUploaderService(BaseUploader):
         n = len(vector_records_list_formatted)
 
         # Decide whether to batch
-        if n > size_threshold:
+        if n > vector_list_size_threshold:
             # Ensure batch size >= 1
             batch_size = max(1, n // batch_size_divisor)
 
@@ -50,8 +50,8 @@ class S3VectorUploaderService(BaseUploader):
         summary_dict = {
             "ok": True,
             "total_records": n,
-            "batched": n > size_threshold,
-            "batch_size": batch_size if n > size_threshold else n,
+            "batched": n > vector_list_size_threshold,
+            "batch_size": batch_size if n > vector_list_size_threshold else n,
             "index_name": index_name
         }
 

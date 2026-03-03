@@ -27,11 +27,13 @@ class DocumentText:
 
 
 class DocumentReaderService:
-    """S3 Bucket document reading service"""
+    """
+    S3 Bucket document reading service
+    """
 
     def __init__(self, bucket_name: str) -> None:
         self.bucket = bucket_name
-        self.s3_client = S3ClientModular(bucket_name, vectors=False)
+        self.s3 = S3ClientModular(bucket_name, vectors=False)
 
     def read_document_from_s3(self, doc_id: str) -> DocumentText:
         """
@@ -46,12 +48,14 @@ class DocumentReaderService:
             raise ValueError("doc_id is required")
 
         try:
-            response = self.s3_client.client.get_object(Bucket=self.bucket, Key=doc_id)
-            raw_bytes = response["Body"].read()
-            content_type = response.get("ContentType", "application/octet-stream")
+            response = self.s3.client.get_object(Bucket=self.bucket, Key=doc_id)
 
+            # Extract raw file bytes from response
+            raw_bytes = response["Body"].read()
             text = self._extract_text(doc_id=doc_id, raw_bytes=raw_bytes)
 
+            # Build DocumentText object to be passed as input to chunking service
+            content_type = response.get("ContentType", "application/octet-stream")
             return DocumentText(
                 doc_id=doc_id,
                 bucket=self.bucket,
@@ -74,6 +78,9 @@ class DocumentReaderService:
 
 
     def _extract_text(self, doc_id: str, raw_bytes: bytes) -> str:
+        """
+        Dispatch raw file bytes to the appropriate text extractor based on the document file extension
+        """
         suffix = PurePosixPath(doc_id).suffix.lower()
 
         if suffix == ".pdf":
@@ -89,12 +96,14 @@ class DocumentReaderService:
 
     @staticmethod
     def _read_pdf_bytes(raw_bytes: bytes) -> str:
+        """Helper function to read and parse .pdf files"""
         reader = PdfReader(BytesIO(raw_bytes))
         pages = [page.extract_text() or "" for page in reader.pages]
         return "\n".join(pages)
 
     @staticmethod
     def _read_docx_bytes(raw_bytes: bytes) -> str:
+        """Helper function to read and parse .docx files"""
         if DocxDocument is None:
             raise RuntimeError("python-docx is required to read DOCX files")
 

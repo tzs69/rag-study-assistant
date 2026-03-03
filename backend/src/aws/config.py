@@ -6,14 +6,7 @@ from pydantic import ConfigDict
 from pydantic_settings import BaseSettings
 
 ENV_FILE_PATH = Path(__file__).resolve().parent / ".env.local"
-
-
-def dotenv_exists(env_filename: str = ".env.local") -> bool:
-    """
-    Verify that a local env file exists in the same folder as this config file.
-    """
-    env_path = Path(__file__).resolve().parent / env_filename
-    return env_path.is_file()
+IS_LAMBDA_RUNTIME = bool(os.getenv("AWS_LAMBDA_FUNCTION_NAME"))
 
 
 class Settings(BaseSettings):
@@ -34,7 +27,6 @@ class Settings(BaseSettings):
     S3_VECTOR_INDEX_NAME: Optional[str] = None
 
     model_config = ConfigDict(
-        env_file=ENV_FILE_PATH,
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -47,11 +39,8 @@ class Settings(BaseSettings):
         return region
 
 
-# Local development expects .env.local, but Lambda runtime should rely on injected env vars.
-if not dotenv_exists() and not any(
-    os.getenv(name)
-    for name in ("AWS_REGION", "AWS_SSO_REGION", "AWS_LAMBDA_FUNCTION_NAME")
-):
+# Local dev requires .env.local; Lambda runtime uses injected env vars
+if not IS_LAMBDA_RUNTIME and not ENV_FILE_PATH.is_file():
     raise FileNotFoundError(f"Missing required env file: {ENV_FILE_PATH}")
 
-settings = Settings()
+settings = Settings(_env_file=ENV_FILE_PATH if not IS_LAMBDA_RUNTIME else None)

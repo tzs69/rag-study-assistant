@@ -11,7 +11,7 @@ Parameters:
     Default: dev
   AwsRegion:
     Type: String
-    Default: ap-southeast-1
+    Default: us-east-1
   PythonRuntime:
     Type: String
     Default: python3.12
@@ -293,7 +293,12 @@ Resources:
               Action:
                 - bedrock:InvokeModel
               Resource: '*'
-            # TODO: add least-privilege s3vectors permissions when final API/resource ARNs are confirmed.
+            - Sid: AwsMarketplaceSubscriptionCheck
+              Effect: Allow
+              Action:
+                - aws-marketplace:ViewSubscriptions
+                - aws-marketplace:Subscribe
+              Resource: '*'            
       Events:
         IngestionQueueEvent:
           Type: SQS
