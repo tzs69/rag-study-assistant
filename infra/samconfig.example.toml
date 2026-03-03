@@ -1,0 +1,38 @@
+version = 0.1
+
+[default.deploy.parameters]
+stack_name = "YOUR-PERSONAL-DEV-TEST"
+resolve_s3 = true
+s3_prefix = "rag-study-assistant-infra-dev-test"
+region = "ap-southeast-1"
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = true
+fail_on_empty_changeset = false
+template_file = "template.yaml"
+parameter_overrides = [
+  "ProjectName=rag-study-assistant",
+  "EnvironmentName=dev",
+  "AwsRegion=ap-southeast-1",
+  "PythonRuntime=python3.12",
+  "S3GeneralPurposeBucketName=REPLACE_ME_UNIQUE_BUCKET",
+  "RawPrefix=raws",
+  "ChunksPrefix=chunks",
+  "S3VectorBucketName=REPLACE_ME_UNIQUE_VECTOR_BUCKET",
+  "S3VectorIndexName=chunk-embeddings-vector-index-sam",
+  "DynamoManifestTableName=document-vector-manifest-sam",
+  "IngestionQueueName=ingest-queue-sam",
+  "IngestionDlqName=ingest-dlq-sam",
+  "DeletionQueueName=delete-queue-sam",
+  "DeletionDlqName=delete-dlq-sam",
+  "QueueVisibilityTimeoutSeconds=360",
+  "ChunkingModelId=amazon.titan-embed-text-v2:0",
+  "EmbeddingModelId=amazon.titan-embed-text-v2:0",
+  "IngestionFunctionName=ingestion-worker-sam",
+  "DeletionFunctionName=deletion-worker-sam",
+  "LambdaMemorySize=1024",
+  "LambdaTimeoutSeconds=180",
+]
+image_repositories = []
+
+[default.global.parameters]
+region = "ap-southeast-1"

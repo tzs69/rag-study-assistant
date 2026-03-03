@@ -1,29 +1,25 @@
 import asyncio
 import logging
 from functools import lru_cache
-from typing import Any, Dict, List
 
 from ..session import get_aws_session
 
+
 @lru_cache(maxsize=1)
-def _get_s3_client():
-    """Create a cached boto3 session configured from env/settings (profile/region)."""
+def _get_s3_client_modular(vectors:bool):
+    """
+    Return a cached s3 gp/vector client using cached boto3 session
+    """
     session = get_aws_session()
-    return session.client("s3")
+    if not vectors:
+        return session.client("s3")
+    else: 
+        return session.client("s3vectors")
 
-
-class S3Client:
+class S3ClientModular:
     """
     Reusable S3Client for uploads into GP buckets (raw pdf docs) & vector buckets  
     """
-    def __init__(self, s3_bucket_name: str):
+    def __init__(self, s3_bucket_name: str, vectors: bool):
         self.s3_bucket_name = s3_bucket_name
-        self.client = _get_s3_client()
-
-    
-
-def get_s3_client(bucket_name) -> S3Client:
-    try:
-        return S3Client(bucket_name)
-    except Exception as e:
-        raise e
+        self.client = _get_s3_client_modular(vectors)

@@ -1,0 +1,8 @@
+pydantic
+pydantic-settings
+fastapi
+python-multipart
+pypdf
+python-docx
+langchain-experimental
+langchain-aws

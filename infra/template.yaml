@@ -1,0 +1,411 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: rag-study-assistant SAM skeleton for S3 -> SQS -> Lambda ingestion/deletion pipeline.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: rag-study-assistant
+  EnvironmentName:
+    Type: String
+    Default: dev
+  AwsRegion:
+    Type: String
+    Default: us-east-1
+  PythonRuntime:
+    Type: String
+    Default: python3.12
+    
+  S3GeneralPurposeBucketName:
+    Type: String
+    Description: Globally unique S3 bucket name for raw/chunk documents.
+  RawPrefix:
+    Type: String
+    Default: raws
+    Description: Prefix (without trailing slash) for uploaded raw docs.
+  ChunksPrefix:
+    Type: String
+    Default: chunks
+    Description: Prefix (without trailing slash) for chunk JSONL outputs.
+
+  S3VectorBucketName:
+    Type: String
+    Default: vector-store-sam
+    Description: S3 vector bucket name used by s3vectors client (app env only in this skeleton).
+  S3VectorIndexName:
+    Type: String
+    Default: chunk-embeddings-vector-index-sam
+
+  DynamoManifestTableName:
+    Type: String
+    Default: rag-doc-vector-manifest
+
+  IngestionQueueName:
+    Type: String
+    Default: ingest-queue-sam
+  IngestionDlqName:
+    Type: String
+    Default: ingest-dlq-sam
+  DeletionQueueName:
+    Type: String
+    Default: delete-queue-sam
+  DeletionDlqName:
+    Type: String
+    Default: delete-dlq-sam
+  QueueVisibilityTimeoutSeconds:
+    Type: Number
+    Default: 360
+
+  ChunkingModelId:
+    Type: String
+    Default: amazon.titan-embed-text-v2:0
+  EmbeddingModelId:
+    Type: String
+    Default: amazon.titan-embed-text-v2:0
+  IngestionFunctionName:
+    Type: String
+    Default: ingest-lambda-worker
+  DeletionFunctionName:
+    Type: String
+    Default: delete-lambda-worker
+  LambdaMemorySize:
+    Type: Number
+    Default: 1024
+  LambdaTimeoutSeconds:
+    Type: Number
+    Default: 120
+  
+
+Globals:
+  Function:
+    Runtime: !Ref PythonRuntime
+    Timeout: !Ref LambdaTimeoutSeconds
+    MemorySize: !Ref LambdaMemorySize
+    Tracing: Active
+    Environment:
+      Variables:
+        AWS_SSO_REGION: !Ref AwsRegion
+        S3_GP_BUCKET_NAME: !Ref S3GeneralPurposeBucket 
+        S3_GP_RAW_PREFIX: !Ref RawPrefix
+        S3_GP_CHUNK_PREFIX: !Ref ChunksPrefix
+        S3_VECTOR_BUCKET_NAME: !Sub '${ProjectName}-${EnvironmentName}-${S3VectorBucketName}' 
+        DYNAMODB_MANIFEST_TABLE_NAME: !Ref ManifestTable
+        CHUNKING_MODEL_ID: !Ref ChunkingModelId
+        EMBEDDING_MODEL_ID: !Ref EmbeddingModelId
+        S3_VECTOR_INDEX_NAME: !Sub '${ProjectName}-${EnvironmentName}-${S3VectorIndexName}'
+    Tags:
+      project: !Ref ProjectName
+      env: !Ref EnvironmentName
+
+Resources:
+
+# -----------------------------------------------------------------------------------------------
+# S3 Resources (General Purpose Bucket for raws/chunks, Vector Bucket & Index for vectors)
+# -----------------------------------------------------------------------------------------------
+
+  S3GeneralPurposeBucket:
+    Type: AWS::S3::Bucket
+    DependsOn:
+      - IngestionQueuePolicy
+      - DeletionQueuePolicy
+    Properties:
+      BucketName: !Sub '${ProjectName}-${EnvironmentName}-${S3GeneralPurposeBucketName}'
+      NotificationConfiguration:
+        QueueConfigurations:
+          - Event: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: !Sub '${RawPrefix}/'
+            Queue: !GetAtt IngestionQueue.Arn
+          - Event: s3:ObjectRemoved:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: !Sub '${RawPrefix}/'
+            Queue: !GetAtt DeletionQueue.Arn
+
+  S3VectorBucket:
+    Type: AWS::S3Vectors::VectorBucket
+    # DeletionPolicy: Retain
+    # UpdateReplacePolicy: Retain
+    Properties:
+      VectorBucketName: !Sub '${ProjectName}-${EnvironmentName}-${S3VectorBucketName}'
+
+  S3VectorIndex:
+    Type: AWS::S3Vectors::Index
+    Properties:
+      IndexName: !Sub '${ProjectName}-${EnvironmentName}-${S3VectorIndexName}'
+      DataType: float32
+      DistanceMetric: cosine
+      VectorBucketArn: !GetAtt S3VectorBucket.VectorBucketArn
+      Dimension: 1024
+
+# -----------------------------------------------------------------------------------------------
+# SQS Resources (Ingestion/Deletion Queues with their respective DLQs and queue policies)
+# -----------------------------------------------------------------------------------------------
+
+  IngestionDlq:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub '${ProjectName}-${EnvironmentName}-${IngestionDlqName}'
+      MessageRetentionPeriod: 1209600
+
+  IngestionQueue: 
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub '${ProjectName}-${EnvironmentName}-${IngestionQueueName}'
+      VisibilityTimeout: !Ref QueueVisibilityTimeoutSeconds
+      MessageRetentionPeriod: 345600
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt IngestionDlq.Arn
+        maxReceiveCount: 5
+
+  DeletionDlq:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub '${ProjectName}-${EnvironmentName}-${DeletionDlqName}'
+      MessageRetentionPeriod: 1209600
+
+  DeletionQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub '${ProjectName}-${EnvironmentName}-${DeletionQueueName}'
+      VisibilityTimeout: !Ref QueueVisibilityTimeoutSeconds
+      MessageRetentionPeriod: 345600
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt DeletionDlq.Arn
+        maxReceiveCount: 5
+
+  IngestionQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref IngestionQueue
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowS3SendIngestEvents
+            Effect: Allow
+            Principal:
+              Service: s3.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: !GetAtt IngestionQueue.Arn
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !Sub 'arn:aws:s3:::${ProjectName}-${EnvironmentName}-${S3GeneralPurposeBucketName}'
+
+  DeletionQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref DeletionQueue
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowS3SendDeleteEvents
+            Effect: Allow
+            Principal:
+              Service: s3.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: !GetAtt DeletionQueue.Arn
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !Sub 'arn:aws:s3:::${ProjectName}-${EnvironmentName}-${S3GeneralPurposeBucketName}'
+
+# -----------------------------------------------------------------------------------------------
+# DynamoDB Resource (Doc-Vector Manifest for tracking ingested docs and their chunk vectors)
+# -----------------------------------------------------------------------------------------------
+  ManifestTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${ProjectName}-${EnvironmentName}-${DynamoManifestTableName}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: doc_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: doc_id
+          KeyType: HASH
+      SSESpecification:
+        SSEEnabled: true
+        
+# ---------------------------------------------------------------------
+# Lambda Resources (Ingestion and Deletion Functions)
+# ---------------------------------------------------------------------
+
+  IngestionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${ProjectName}-${EnvironmentName}-${IngestionFunctionName}'
+      CodeUri: ../backend/src/
+      Handler: aws.workers.ingest_lambda_worker.ingestion_handler
+      Description: Processes SQS-wrapped S3 create events for raw document ingestion.
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Statement:
+            - Sid: SQSConsumeIngestion
+              Effect: Allow
+              Action:
+                - sqs:ReceiveMessage
+                - sqs:DeleteMessage
+                - sqs:GetQueueAttributes
+                - sqs:ChangeMessageVisibility
+              Resource: !GetAtt IngestionQueue.Arn
+            - Sid: ReadWriteDocBucket
+              Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:PutObject
+                - s3:DeleteObject
+                - s3:ListBucket
+              Resource:
+                - !GetAtt S3GeneralPurposeBucket.Arn
+                - !Sub 'arn:aws:s3:::${ProjectName}-${EnvironmentName}-${S3GeneralPurposeBucketName}/*'
+            - Sid: ReadWriteVectorIndex
+              Effect: Allow
+              Action:
+                - s3vectors:GetIndex
+                - s3vectors:GetVectors
+                - s3vectors:PutVectors
+                - s3vectors:DeleteVectors
+                - s3vectors:ListVectors
+              Resource:
+                - !Ref S3VectorIndex
+            - Sid: ListVectorIndexes
+              Effect: Allow
+              Action:
+                - s3vectors:ListIndexes
+              Resource:
+                - !GetAtt S3VectorBucket.VectorBucketArn
+            - Sid: DynamoManifestRW
+              Effect: Allow
+              Action:
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:GetItem
+                - dynamodb:DeleteItem
+              Resource: !GetAtt ManifestTable.Arn
+            - Sid: BedrockInvoke
+              Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+              Resource: '*'
+            - Sid: AwsMarketplaceSubscriptionCheck
+              Effect: Allow
+              Action:
+                - aws-marketplace:ViewSubscriptions
+                - aws-marketplace:Subscribe
+              Resource: '*'            
+      Events:
+        IngestionQueueEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt IngestionQueue.Arn
+            BatchSize: 1
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
+
+  DeletionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${ProjectName}-${EnvironmentName}-${DeletionFunctionName}'
+      CodeUri: ../backend/src/
+      Handler: aws.workers.delete_lambda_worker.deletion_handler
+      Description: Processes SQS-wrapped S3 delete events for cleanup.
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Statement:
+            - Sid: SQSConsumeDeletion
+              Effect: Allow
+              Action:
+                - sqs:ReceiveMessage
+                - sqs:DeleteMessage
+                - sqs:GetQueueAttributes
+                - sqs:ChangeMessageVisibility
+              Resource: !GetAtt DeletionQueue.Arn
+            - Sid: ReadWriteDocBucket
+              Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:DeleteObject
+                - s3:ListBucket
+              Resource:
+                - !GetAtt S3GeneralPurposeBucket.Arn
+                - !Sub 'arn:aws:s3:::${ProjectName}-${EnvironmentName}-${S3GeneralPurposeBucketName}/*'
+            - Sid: ReadWriteVectorIndex
+              Effect: Allow
+              Action:
+                - s3vectors:GetIndex
+                - s3vectors:GetVectors
+                - s3vectors:DeleteVectors
+                - s3vectors:ListVectors
+              Resource:
+                - !Ref S3VectorIndex
+            - Sid: ListVectorIndexes
+              Effect: Allow
+              Action:
+                - s3vectors:ListIndexes
+              Resource:
+                - !GetAtt S3VectorBucket.VectorBucketArn
+            - Sid: DynamoManifestRW
+              Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:DeleteItem
+                - dynamodb:UpdateItem
+              Resource: !GetAtt ManifestTable.Arn
+            # TODO: add s3vectors delete permissions once final index resource ARN is known.
+      Events:
+        DeletionQueueEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt DeletionQueue.Arn
+            BatchSize: 1
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
+
+Outputs:
+  S3GeneralPurposeBucketName:
+    Description: S3 bucket for raw and chunk artifacts.
+    Value: !Ref S3GeneralPurposeBucket
+  S3GeneralPurposeBucketArn:
+    Value: !GetAtt S3GeneralPurposeBucket.Arn
+  S3VectorBucketName:
+    Description: S3 Vector bucket name used for vector storage.
+    Value: !Sub '${ProjectName}-${EnvironmentName}-${S3VectorBucketName}'
+  S3VectorBucketArn:
+    Description: S3 Vector bucket ARN.
+    Value: !GetAtt S3VectorBucket.VectorBucketArn
+  S3VectorIndexArn:
+    Description: S3 Vector index ARN.
+    Value: !Ref S3VectorIndex
+  S3VectorIndexName:
+    Description: S3 Vector index name used for vector storage.
+    Value: !Sub '${ProjectName}-${EnvironmentName}-${S3VectorIndexName}'
+  IngestionQueueUrl:
+    Value: !Ref IngestionQueue
+  IngestionQueueArn:
+    Value: !GetAtt IngestionQueue.Arn
+  IngestionDlqUrl:
+    Value: !Ref IngestionDlq
+  DeletionQueueUrl:
+    Value: !Ref DeletionQueue
+  DeletionQueueArn:
+    Value: !GetAtt DeletionQueue.Arn
+  DeletionDlqUrl:
+    Value: !Ref DeletionDlq
+  IngestionFunctionName:
+    Value: !Ref IngestionFunction
+  IngestionFunctionArn:
+    Value: !GetAtt IngestionFunction.Arn
+  DeletionFunctionName:
+    Value: !Ref DeletionFunction
+  DeletionFunctionArn:
+    Value: !GetAtt DeletionFunction.Arn
+  ManifestTableName:
+    Value: !Ref ManifestTable
+  ManifestTableArn:
+    Value: !GetAtt ManifestTable.Arn

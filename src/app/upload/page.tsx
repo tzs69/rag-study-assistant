@@ -38,7 +38,6 @@ export default function UploadPage() {
         throw new Error(message);
       }
 
-      // This is the object you passed into NextResponse.json(...)
       const data: {
         ok: boolean;
         fileCount: number;
@@ -62,17 +61,19 @@ export default function UploadPage() {
       <Stack spacing={3}>
         <Box>
           <Typography variant="h5" fontWeight={700} gutterBottom>
-            Upload document
+            Document Upload Page
           </Typography>
           <Typography color="text.secondary">
-            This is a placeholder. Add your upload form here.
+            Only .pdf, .docx, .txt and .md files allowed.
           </Typography>
         </Box>
 
         <Stack direction="row" spacing={2} alignItems="center">
           <Button variant="outlined" component="label">
             Choose file
-            <input type="file" multiple 
+            <input type="file" 
+              multiple 
+              accept=".pdf, .docx, .txt, .md"
               onChange={handleFileChange} 
               hidden
             />
