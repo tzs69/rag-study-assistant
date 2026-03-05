@@ -7,10 +7,10 @@ from pathlib import PurePosixPath
 from typing import Any, List
 import uuid
 
-from .s3_base_uploader import BaseUploader
+from .s3_base_store import BaseStore
 
 
-class S3GPRawUploaderService(BaseUploader):
+class S3GPRawDocumentStore(BaseStore):
     
     def __init__(self, bucket: str, raw_prefix: str = "raws"):
         

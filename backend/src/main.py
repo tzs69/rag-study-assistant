@@ -2,10 +2,10 @@
 from fastapi import FastAPI, UploadFile, File
 from fastapi import HTTPException
 from .indexing.config import settings
-from .indexing.services.uploaders.s3_gp_raw_uploader_service import S3GPRawUploaderService
+from .indexing.services.s3_gp_raw_document_store import S3GPRawDocumentStore
 
 app = FastAPI()
-rawdoc_uploader = S3GPRawUploaderService(
+rawdoc_uploader = S3GPRawDocumentStore(
     settings.S3_GP_BUCKET_NAME,
     raw_prefix=settings.S3_GP_RAW_PREFIX,
 )

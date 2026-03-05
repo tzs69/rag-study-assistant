@@ -3,10 +3,10 @@ from __future__ import annotations
 from typing import Any, Dict, Iterable, List, Optional
 from botocore.exceptions import ClientError
 
-from ...clients.dynamodb_client import DyanmoDBClient
-from ..embedding_service import VectorRecord
+from ..clients.dynamodb_client import DyanmoDBClient
+from .embedding_service import VectorRecord
 
-class DynamoDBUploaderService:
+class ManifestRepository:
     """
     Writes manifest records and ingestion status metadata into a DynamoDB table.
 

@@ -1,13 +1,13 @@
 """
-Docstring for backend.src.aws.services.uploaders.s3_vector_uploader_service
+Persistence service for writing document vectors into the configured S3 Vector bucket/index.
 """
 from typing import Any, List
 from dataclasses import asdict
 
-from .s3_base_uploader import BaseUploader
-from ..embedding_service import VectorRecord
+from .s3_base_store import BaseStore
+from .embedding_service import VectorRecord
 
-class S3VectorUploaderService(BaseUploader):
+class S3VectorStore(BaseStore):
     def __init__(self, bucket, vectors):
         super().__init__(bucket, vectors=True)
 

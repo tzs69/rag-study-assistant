@@ -5,11 +5,11 @@ from dataclasses import asdict
 from pathlib import PurePosixPath
 from typing import Any, List
 
-from ..chunking_service import Chunk
-from .s3_base_uploader import BaseUploader
+from .chunking_service import Chunk
+from .s3_base_store import BaseStore
 
 
-class S3GPChunkUploaderService(BaseUploader):
+class S3GPChunkStore(BaseStore):
 
     def __init__(self, bucket: str, chunks_prefix: str = "chunks"):
         super().__init__(bucket, vectors=False)

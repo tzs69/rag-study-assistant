@@ -2,11 +2,11 @@ import json
 import logging
 from urllib.parse import unquote_plus
 from ..services.document_reader_service import DocumentReaderService, DocumentText
-from ..services.uploaders.dynamodb_uploader import DynamoDBUploaderService
-from ..services.uploaders.s3_gp_chunk_uploader_service import S3GPChunkUploaderService
+from ..services.manifest_repository import ManifestRepository
+from ..services.s3_gp_chunk_store import S3GPChunkStore
 from ..services.chunking_service import SemanticChunkingService, Chunk
 from ..services.embedding_service import EmbeddingService, VectorRecord
-from ..services.uploaders.s3_vector_uploader_service import S3VectorUploaderService
+from ..services.s3_vector_store import S3VectorStore
 from ..config import settings
 
 from typing import List
@@ -47,11 +47,11 @@ def ingestion_handler(event, context):
 
     # Initialize helper classes
     document_reader = DocumentReaderService(bucket_name=settings.S3_GP_BUCKET_NAME)
-    dynamodb_uploader = DynamoDBUploaderService(table_name=settings.DYNAMODB_MANIFEST_TABLE_NAME)      
+    manifest_repository = ManifestRepository(table_name=settings.DYNAMODB_MANIFEST_TABLE_NAME)      
     chunking_service = SemanticChunkingService(chunking_llm_model_id=settings.CHUNKING_MODEL_ID)
-    chunk_uploader = S3GPChunkUploaderService(bucket=settings.S3_GP_BUCKET_NAME, chunks_prefix=settings.S3_GP_CHUNK_PREFIX)
+    chunk_store = S3GPChunkStore(bucket=settings.S3_GP_BUCKET_NAME, chunks_prefix=settings.S3_GP_CHUNK_PREFIX)
     embedding_service = EmbeddingService(embedding_model_id=settings.EMBEDDING_MODEL_ID)
-    s3_vector_uploader = S3VectorUploaderService(bucket=settings.S3_VECTOR_BUCKET_NAME, vectors=True)
+    vector_store = S3VectorStore(bucket=settings.S3_VECTOR_BUCKET_NAME, vectors=True)
     
     req_id = context.aws_request_id
 
@@ -129,7 +129,7 @@ def ingestion_handler(event, context):
             doc_id = unquote_plus(raw_key)
 
             # Claim ingestion of document
-            claim_response = dynamodb_uploader.claim_reclaim_ingestion(
+            claim_response = manifest_repository.claim_reclaim_ingestion(
                 doc_id=doc_id, bucket=bucket, req_id=req_id
             )
             logger.info(
@@ -165,7 +165,7 @@ def ingestion_handler(event, context):
                 logger.exception(
                     f"Ingestion raw document read failed (doc_id=doc_id{doc_id} bucket={bucket} sqs_message_id={sqs_message_id} aws_request_id={req_id})",                    
                 )
-                dynamodb_uploader.mark_ingestion_failed(doc_id=doc_id, error_message=str(e))
+                manifest_repository.mark_ingestion_failed(doc_id=doc_id, error_message=str(e))
                 raise RuntimeError(f"Document reading failed for doc_id='{doc_id}'") from e
 
 
@@ -185,13 +185,13 @@ def ingestion_handler(event, context):
                 logger.exception(
                     f"Ingestion chunking failed (doc_id={doc_id} sqs_message_id={sqs_message_id} aws_request_id={req_id})"
                 )
-                dynamodb_uploader.mark_ingestion_failed(doc_id=doc_id, error_message=str(e))
+                manifest_repository.mark_ingestion_failed(doc_id=doc_id, error_message=str(e))
                 raise RuntimeError(f"Document chunking failed for doc_id='{doc_id}'") from e
             
             
             # Upload chunks to S3 and get their vector embeddings
             try:
-                chunk_upload_response = chunk_uploader.upload_chunks_jsonl(doc_id=doc_id, chunks=chunks)
+                chunk_upload_response = chunk_store.upload_chunks_jsonl(doc_id=doc_id, chunks=chunks)
                 logger.info(json.dumps(
                     {
                         "event": "ingestion_chunk_upload_success", 
@@ -202,14 +202,14 @@ def ingestion_handler(event, context):
                 logger.exception(
                     f"Ingestion chunk upload failed (doc_id={doc_id} sqs_message_id={sqs_message_id} aws_request_id={req_id})"
                 )
-                dynamodb_uploader.mark_ingestion_failed(doc_id=doc_id, error_message=str(e))
+                manifest_repository.mark_ingestion_failed(doc_id=doc_id, error_message=str(e))
                 raise RuntimeError(f"Chunk upload failed for doc_id='{doc_id}'") from e
             
             
             # Generate embeddings for chunks and upload vectors to S3
             try:
                 vector_payloads: List[VectorRecord] = embedding_service.embed_chunks(chunks)
-                vector_upload_response = s3_vector_uploader.upload_vectors(
+                vector_upload_response = vector_store.upload_vectors(
                     vector_records_list=vector_payloads, 
                     index_name=settings.S3_VECTOR_INDEX_NAME,
                     vector_list_size_threshold=VECTOR_LIST_SIZE_THRESHOLD,
@@ -226,13 +226,13 @@ def ingestion_handler(event, context):
                 logger.exception(
                     f"Ingestion vector upload failed (doc_id={doc_id} sqs_message_id={sqs_message_id} aws_request_id={req_id})"
                 )
-                dynamodb_uploader.mark_ingestion_failed(doc_id=doc_id, error_message=str(e))
+                manifest_repository.mark_ingestion_failed(doc_id=doc_id, error_message=str(e))
                 raise RuntimeError(f"Vector embedding generation or vector upload failed for doc_id='{doc_id}'") from e
             
 
             # Finalize ingestion by updating manifest with vector keys and transitioning status to `indexed`
             try:
-                finalize_response = dynamodb_uploader.update_vectors_finalize_ingestion(
+                finalize_response = manifest_repository.update_vectors_finalize_ingestion(
                     doc_id=doc_id, req_id=req_id, vector_records_list=vector_payloads
                 )
                 logger.info(json.dumps(
@@ -246,5 +246,5 @@ def ingestion_handler(event, context):
                 logger.exception(
                     f"Ingestion finalization manifest upsert failed (doc_id={doc_id} sqs_message_id={sqs_message_id} aws_request_id={req_id})"
                 )
-                dynamodb_uploader.mark_ingestion_failed(doc_id=doc_id, error_message=str(e))
+                manifest_repository.mark_ingestion_failed(doc_id=doc_id, error_message=str(e))
                 raise RuntimeError(f"Finalizing ingestion failed for doc_id='{doc_id}'") from e
