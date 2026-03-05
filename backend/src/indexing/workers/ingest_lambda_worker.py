@@ -31,15 +31,17 @@ def ingestion_handler(event, context):
         event (dict): The event data containing information about the S3 create action.
         context (object): The runtime information of the Lambda function.
     """
+    req_id = context.aws_request_id
     
-    if "Records" not in event:
-        raise ValueError("Invalid event format: 'Records' key not found")
+    sqs_ingest_events_list = event.get("Records")
+    if not isinstance(sqs_ingest_events_list, list):
+        raise ValueError("Invalid event format: 'Records'")
     
     logger.info(
         json.dumps(
             {
                 "event": "ingestion_handler_started",
-                "aws_request_id": context.aws_request_id,
+                "aws_request_id": req_id,
                 "record_count": len(event["Records"]),
             }
         )
@@ -51,15 +53,13 @@ def ingestion_handler(event, context):
     chunking_service = SemanticChunkingService(chunking_llm_model_id=settings.CHUNKING_MODEL_ID)
     chunk_store = S3GPChunkStore(bucket=settings.S3_GP_BUCKET_NAME, chunks_prefix=settings.S3_GP_CHUNK_PREFIX)
     embedding_service = EmbeddingService(embedding_model_id=settings.EMBEDDING_MODEL_ID)
-    vector_store = S3VectorStore(bucket=settings.S3_VECTOR_BUCKET_NAME, vectors=True)
+    vector_store = S3VectorStore(bucket=settings.S3_VECTOR_BUCKET_NAME, vector_index=settings.S3_VECTOR_INDEX_NAME)
     
-    req_id = context.aws_request_id
-
-    for sqs_record in event["Records"]:
-        sqs_message_id = sqs_record.get("messageId")
+    for sqs_ingestion_record in event["Records"]:
+        sqs_message_id = sqs_ingestion_record.get("messageId")
 
         try:
-            payload = json.loads(sqs_record["body"])
+            payload = json.loads(sqs_ingestion_record["body"])
         except (KeyError, TypeError, json.JSONDecodeError):
             logger.warning(
                 f"Ingestion skip SQS event: invalid json body (sqs_message_id={sqs_message_id})"
@@ -93,8 +93,7 @@ def ingestion_handler(event, context):
             
             # Validate existence of keys nested within s3 data 
             bucket_data = s3_data.get("bucket")
-            object_data = s3_data.get("object")
-            if not isinstance(bucket_data, dict) or not isinstance(object_data, dict):
+            if not isinstance(bucket_data, dict):
                 logger.warning(
                     f"Ingestion skip s3 event: missing 'bucket' key in s3_event[s3] (sqs_message_id={sqs_message_id})"
                 )
@@ -103,6 +102,12 @@ def ingestion_handler(event, context):
             if not isinstance(bucket, str) or not bucket:
                 logger.warning(
                     f"Ingestion skip s3 event: missing 'name' key in s3_event[s3][bucket] (sqs_message_id={sqs_message_id})"
+                )
+                continue
+            object_data = s3_data.get("object")
+            if not isinstance(object_data, dict):
+                logger.warning(
+                    f"Ingestion skip s3 event: missing 'object' key in s3_event[s3] (sqs_message_id={sqs_message_id})"
                 )
                 continue
             raw_key = object_data.get("key")
@@ -129,7 +134,7 @@ def ingestion_handler(event, context):
             doc_id = unquote_plus(raw_key)
 
             # Claim ingestion of document
-            claim_response = manifest_repository.claim_reclaim_ingestion(
+            ingestion_claim_response = manifest_repository.claim_reclaim_ingestion(
                 doc_id=doc_id, bucket=bucket, req_id=req_id
             )
             logger.info(
@@ -140,12 +145,12 @@ def ingestion_handler(event, context):
                         "bucket": bucket,
                         "sqs_message_id": sqs_message_id,
                         "s3_event_name": eventName,
-                        "status": claim_response.get("status"),
+                        "status": ingestion_claim_response.get("status"),
                         "aws_request_id": req_id,
                     }
                 )
             )
-            if claim_response["status"] != "processing":
+            if ingestion_claim_response["status"] != "ingesting":
                 continue
 
 
@@ -165,7 +170,7 @@ def ingestion_handler(event, context):
                 logger.exception(
                     f"Ingestion raw document read failed (doc_id=doc_id{doc_id} bucket={bucket} sqs_message_id={sqs_message_id} aws_request_id={req_id})",                    
                 )
-                manifest_repository.mark_ingestion_failed(doc_id=doc_id, error_message=str(e))
+                manifest_repository.mark_manifest_failed(doc_id=doc_id, ingest=True, error_message=str(e))
                 raise RuntimeError(f"Document reading failed for doc_id='{doc_id}'") from e
 
 
@@ -185,7 +190,7 @@ def ingestion_handler(event, context):
                 logger.exception(
                     f"Ingestion chunking failed (doc_id={doc_id} sqs_message_id={sqs_message_id} aws_request_id={req_id})"
                 )
-                manifest_repository.mark_ingestion_failed(doc_id=doc_id, error_message=str(e))
+                manifest_repository.mark_manifest_failed(doc_id=doc_id, ingest=True, error_message=str(e))
                 raise RuntimeError(f"Document chunking failed for doc_id='{doc_id}'") from e
             
             
@@ -202,7 +207,7 @@ def ingestion_handler(event, context):
                 logger.exception(
                     f"Ingestion chunk upload failed (doc_id={doc_id} sqs_message_id={sqs_message_id} aws_request_id={req_id})"
                 )
-                manifest_repository.mark_ingestion_failed(doc_id=doc_id, error_message=str(e))
+                manifest_repository.mark_manifest_failed(doc_id=doc_id, ingest=True, error_message=str(e))
                 raise RuntimeError(f"Chunk upload failed for doc_id='{doc_id}'") from e
             
             
@@ -211,7 +216,6 @@ def ingestion_handler(event, context):
                 vector_payloads: List[VectorRecord] = embedding_service.embed_chunks(chunks)
                 vector_upload_response = vector_store.upload_vectors(
                     vector_records_list=vector_payloads, 
-                    index_name=settings.S3_VECTOR_INDEX_NAME,
                     vector_list_size_threshold=VECTOR_LIST_SIZE_THRESHOLD,
                     batch_size_divisor=VECTOR_UPLOAD_BATCH_SIZE_DIVISOR
                 )
@@ -226,19 +230,19 @@ def ingestion_handler(event, context):
                 logger.exception(
                     f"Ingestion vector upload failed (doc_id={doc_id} sqs_message_id={sqs_message_id} aws_request_id={req_id})"
                 )
-                manifest_repository.mark_ingestion_failed(doc_id=doc_id, error_message=str(e))
+                manifest_repository.mark_manifest_failed(doc_id=doc_id, ingest=True, error_message=str(e))
                 raise RuntimeError(f"Vector embedding generation or vector upload failed for doc_id='{doc_id}'") from e
             
 
             # Finalize ingestion by updating manifest with vector keys and transitioning status to `indexed`
             try:
-                finalize_response = manifest_repository.update_vectors_finalize_ingestion(
+                finalize_ingestion_response = manifest_repository.update_vectors_finalize_ingestion(
                     doc_id=doc_id, req_id=req_id, vector_records_list=vector_payloads
                 )
                 logger.info(json.dumps(
                     {
                         "event": "ingestion_finalize_success", 
-                        **finalize_response, 
+                        **finalize_ingestion_response, 
                         "aws_request_id": req_id
                     }
                 ))
@@ -246,5 +250,5 @@ def ingestion_handler(event, context):
                 logger.exception(
                     f"Ingestion finalization manifest upsert failed (doc_id={doc_id} sqs_message_id={sqs_message_id} aws_request_id={req_id})"
                 )
-                manifest_repository.mark_ingestion_failed(doc_id=doc_id, error_message=str(e))
-                raise RuntimeError(f"Finalizing ingestion failed for doc_id='{doc_id}'") from e
+                manifest_repository.mark_manifest_failed(doc_id=doc_id, ingest=True, error_message=str(e))
+                raise RuntimeError(f"Ingestion finalization failed for doc_id='{doc_id}'") from e

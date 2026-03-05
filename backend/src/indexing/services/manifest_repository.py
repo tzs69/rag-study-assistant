@@ -11,9 +11,13 @@ class ManifestRepository:
     Writes manifest records and ingestion status metadata into a DynamoDB table.
 
     Intended use:
-    - Claim/reclaim ingestion work for a document (`processing` state)
+    - Claim/reclaim ingestion work for a document (`ingesting` state)
     - Persist a manifest of vector keys by `doc_id` (for delete cleanup)
-    - Track ingestion lifecycle status (`processing` / `indexed` / `failed`)
+    - Track lifecycle status (`ingesting` / `indexed` / `ingest failed` / `deleting` / `delete failed` / `deleted`)
+
+    Invariant:
+    - Update-only operations include `attribute_exists(doc_id)` conditions so they never
+      upsert/create a new row by accident.
 
     This class uses the low-level boto3 DynamoDB client payload format.
     """
@@ -31,15 +35,15 @@ class ManifestRepository:
 
         Behavior:
         - If no manifest record exists, insert a new placeholder manifest with:
-          `status="processing"` and an empty `vector_keys` list.
-        - If a record already exists, reclaim it only when current `status == "failed"`
-          by transitioning it back to `processing` and updating `req_id`.
-        - If a record exists with any other status (for example `processing` or `indexed`),
+          `status="ingesting"` and an empty `vector_keys` list.
+        - If a record already exists, reclaim it only when current `status == "ingest failed"`
+          by transitioning it back to `ingesting` and updating `req_id`.
+        - If a record exists with any other status (for example `ingesting` or `indexed`),
           return a skipped status so the caller can avoid duplicate work.
 
         Returns a small status dict for handler control flow. Current outcomes include:
-        - `processing` (new claim or successful reclaim)
-        - `skipped` (record exists but is not reclaimable)
+        - `ingesting` (new claim or successful reclaim)
+        - `skipped ingestion` (record exists but is not reclaimable)
         """
         if not doc_id or not str(doc_id).strip():
             raise ValueError("doc_id is required")
@@ -57,19 +61,19 @@ class ManifestRepository:
                     "bucket": {"S": bucket},
                     "req_id": {"S": req_id},
                     "vector_keys": {"L": []},  # Start with an empty list of vector keys
-                    "status": {"S": "processing"}  # Initial status
+                    "status": {"S": "ingesting"}  # Initial status
                 },
                 ConditionExpression="attribute_not_exists(doc_id)"  # Ensure we don't overwrite an existing record
             )
 
             return {
                 "doc_id": doc_id,
-                "status": "processing",
+                "status": "ingesting",
             }
         
         except ClientError as e:
 
-            # Record already exists. Only allow retry reclaim from failed -> processing.
+            # Record already exists. Only allow retry reclaim from ingest failed -> ingesting.
             if e.response['Error']['Code'] == "ConditionalCheckFailedException":
                 try:
                     self.dynamodb.client.update_item(
@@ -78,22 +82,22 @@ class ManifestRepository:
                         UpdateExpression="SET #s = :s, #r = :r",
                         ExpressionAttributeNames={"#s": "status", "#r": "req_id"},
                         ExpressionAttributeValues={
-                            ":s": {"S": "processing"},
+                            ":s": {"S": "ingesting"},
                             ":r": {"S": req_id},
-                            ":failed": {"S": "failed"},
+                            ":ingest_failed": {"S": "ingest failed"},
                         },
-                        ConditionExpression="#s = :failed",
+                        ConditionExpression="attribute_exists(doc_id) AND #s = :ingest_failed",
                     )
 
                     return {
                         "doc_id": doc_id,
-                        "status": "processing",
+                        "status": "ingesting",
                     }
                 except ClientError as update_error:
                     if update_error.response["Error"]["Code"] == "ConditionalCheckFailedException":
                         return {
                             "doc_id": doc_id,
-                            "status": "skipped",
+                            "status": "skipped ingestion",
                         }
                     raise update_error
             
@@ -103,7 +107,8 @@ class ManifestRepository:
                     Key={"doc_id": {"S": doc_id}},
                     UpdateExpression="SET #s = :s",
                     ExpressionAttributeNames={"#s": "status"},
-                    ExpressionAttributeValues={":s": {"S": "failed"}}
+                    ExpressionAttributeValues={":s": {"S": "ingest failed"}},
+                    ConditionExpression="attribute_exists(doc_id)",
                 )
                 raise e
 
@@ -118,7 +123,7 @@ class ManifestRepository:
 
         Safety guard:
         - This update is conditional and only succeeds when the manifest is currently
-          `status == "processing"` and the stored `req_id` matches the caller's `req_id`.
+          `status == "ingesting"` and the stored `req_id` matches the caller's `req_id`.
         - This prevents stale/duplicate invocations from overwriting the manifest after
           another attempt has reclaimed ownership.
         """
@@ -141,25 +146,24 @@ class ManifestRepository:
         self.dynamodb.client.update_item(
             TableName=self.table_name,
             Key={"doc_id": {"S": doc_id}},
-            UpdateExpression="SET #v = :v, #s = :status",
+            UpdateExpression="SET #v = :v, #s = :s",
             ExpressionAttributeNames={'#v': "vector_keys", "#s": "status", "#r": "req_id"},
             ExpressionAttributeValues={
                 ":v": {"L": [{"S": key} for key in vector_keys]}, 
-                ":status": {"S": status},
-                ":processing": {"S": "processing"},
+                ":s": {"S": status},
+                ":ingesting": {"S": "ingesting"},
                 ":req_id": {"S": req_id},
             },
-            ConditionExpression="#s = :processing AND #r = :req_id"
+            ConditionExpression="attribute_exists(doc_id) AND #s = :ingesting AND #r = :req_id"
         )
 
         return {
             "doc_id": doc_id,
             # "vector_key_count": len(vector_keys), # Check that this mathches the length of vector_records_list
             "status": status,
-            "error": None
         }
     
-    def mark_ingestion_failed(self, doc_id: str, *, error_message: Optional[str] = None,) -> Dict[str, Any]:
+    def mark_manifest_failed(self, ingest: bool, doc_id: str, *, error_message: Optional[str] = None,) -> Dict[str, Any]:
         """
         Mark an existing manifest record as `failed`.
 
@@ -168,7 +172,7 @@ class ManifestRepository:
         manifest has already been claimed.
         """
         self._validate_doc_id(doc_id)
-        status = "failed"
+        status = "ingest failed" if ingest else "delete failed"
 
         update_expression = "SET #s = :s"
         expression_attribute_names = {"#s": "status"}
@@ -185,6 +189,7 @@ class ManifestRepository:
             UpdateExpression=update_expression,
             ExpressionAttributeNames=expression_attribute_names,
             ExpressionAttributeValues=expression_attribute_values,
+            ConditionExpression="attribute_exists(doc_id)",
         )
 
         return {"doc_id": doc_id, "status": status}
@@ -194,23 +199,98 @@ class ManifestRepository:
     def _validate_doc_id(doc_id: str) -> None:
         if not doc_id or not str(doc_id).strip():
             raise ValueError("doc_id is required")
-        
+    
 
-    def get_manifest_record(self, doc_id: str) -> Dict[str, Any]:
+    def claim_reclaim_deletion(self, doc_id: str, req_id: str) -> Dict[str, Any]:
         """
-        Fetch a manifest record by `doc_id` (raw DynamoDB get_item response shape)
+        Claim deletion for a document, or reclaim it only if a prior attempt failed.
+
+        Behaviour:
+        - Transition status to `deleting` only when current status is `indexed` or `delete failed`.
+        - Return `vector_keys` from the same conditional update response (`ALL_NEW`) for downstream vector deletion.
+        - Return `skipped deletion` when the row is not in a reclaimable state.
+        """
+        self._validate_doc_id(doc_id)
+        if not req_id or not str(req_id).strip():
+            raise ValueError("req_id is required")
+        try:
+            response = self.dynamodb.client.update_item(
+                TableName=self.table_name,
+                Key={"doc_id": {"S": doc_id}},
+                UpdateExpression="SET #s = :s, #r = :r",
+                ExpressionAttributeNames={"#s": "status", "#r": "req_id"},
+                ExpressionAttributeValues={
+                    ":s": {"S": "deleting"},
+                    ":r": {"S": req_id},
+                    ":indexed": {"S": "indexed"},
+                    ":delete_failed": {"S": "delete failed"}
+                },
+                # Prevent creation of new row (deletion should only affect pre-existing rows)
+                ConditionExpression="attribute_exists(doc_id) AND (#s = :indexed OR #s = :delete_failed)",
+                ReturnValues="ALL_NEW",
+            )
+
+            # Build list of vector keys to be passed as input to s3 vector store for deletion
+            attrs = response.get("Attributes", {})
+            vector_keys_attr = attrs.get("vector_keys", {"L": []})
+            vector_keys_list_raw = vector_keys_attr.get("L", [])
+            vector_keys_list_mapped: List[str] = [vk["S"] for vk in vector_keys_list_raw if "S" in vk]
+
+            return {
+                "doc_id": doc_id,
+                "status": "deleting",
+                "vector_keys": vector_keys_list_mapped,
+            }
+        
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+                return {
+                    "doc_id": doc_id,
+                    "status": "skipped deletion",
+                    "vector_keys": [],
+                }
+            raise e
+
+
+    def clear_vectors_finalize_deletion(self, doc_id: str, req_id: str) -> Dict[str, Any]:
+        """
+        Finalize deletion by clearing list of vector keys for manifest row and transitioning status to `deleted`.
+        
+        Safety guard:
+        - This update is conditional and only succeeds when the manifest is currently
+          `status == "deleting"` and the stored `req_id` matches the caller's `req_id`.
         """
         self._validate_doc_id(doc_id)
 
-        response = self.dynamodb.client.get_item(
+        if not req_id or not str(req_id).strip():
+            raise ValueError("req_id is required")
+        
+        status = "deleted"
+        self.dynamodb.client.update_item(
             TableName=self.table_name,
             Key={"doc_id": {"S": doc_id}},
+            UpdateExpression="SET #v = :v, #s = :s",
+            ExpressionAttributeNames={'#v': "vector_keys", "#s": "status", "#r": "req_id"},
+            ExpressionAttributeValues={
+                ":v": {"L": []}, 
+                ":s": {"S": status},
+                ":deleting": {"S": "deleting"},
+                ":req_id": {"S": req_id},
+            },
+            ConditionExpression="attribute_exists(doc_id) AND #s = :deleting AND #r = :req_id"
         )
-        return response
+
+        return {
+            "doc_id": doc_id,
+            "status": status,
+        }
+
 
     def delete_manifest_record(self, doc_id: str) -> Dict[str, Any]:
         """
-        Delete a manifest record by `doc_id` (typically used by deletion cleanup flow)
+        Hard-delete a manifest record by `doc_id`.
+
+        Typically used as a cleanup utility when permanent manifest removal is desired.
         """
         self._validate_doc_id(doc_id)
 
@@ -219,3 +299,5 @@ class ManifestRepository:
             Key={"doc_id": {"S": doc_id}},
         )
         return {"doc_id": doc_id, "table_name": self.table_name, "deleted": True}
+
+    

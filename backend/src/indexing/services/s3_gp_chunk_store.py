@@ -65,3 +65,20 @@ class S3GPChunkStore(BaseStore):
                 raise TypeError("Each chunk must be a Chunk object")
             lines.append(json.dumps(payload, ensure_ascii=False))
         return ("\n".join(lines) + "\n").encode("utf-8")
+
+
+    def delete_chunks_for_docid(self, doc_id:str):
+        """
+        Takes a raw doc_id, converts it into chunk key format ('chunks/{doc_id}_chunks.jsonl') 
+        and deletes the associated .jsonl object referenced by the built chunk key
+        """
+        doc_id_chunk_jsonl_key = self._build_chunks_key(doc_id)
+        self.s3.client.delete_object(
+            Bucket=self.bucket,
+            Key=doc_id_chunk_jsonl_key,
+        )
+        return {
+            "doc_id": doc_id,
+            "bucket": self.bucket,
+            "key": doc_id_chunk_jsonl_key
+        }

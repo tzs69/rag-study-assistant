@@ -1,5 +1,3 @@
-import asyncio
-import logging
 from functools import lru_cache
 
 from ..session import get_aws_session

@@ -48,7 +48,7 @@ class EmbeddingService:
         # Embed the chunk texts and return list of vectors 
         vectors_only: List[List[float]] = self.embedding_model.embed_documents(text_only) 
         
-        # Construct list of VectorRecords to be passed as input to Vector uploader service
+        # Construct list of VectorRecords to be passed as input to s3 vector store
         for idx, chunk in enumerate(chunks_list):
             """
             Sample of payload format into s3 vectors:

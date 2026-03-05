@@ -1,20 +1,20 @@
 """
 Persistence service for writing document vectors into the configured S3 Vector bucket/index.
 """
-from typing import Any, List
+from typing import Any, Dict, List
 from dataclasses import asdict
 
 from .s3_base_store import BaseStore
 from .embedding_service import VectorRecord
 
 class S3VectorStore(BaseStore):
-    def __init__(self, bucket, vectors):
+    def __init__(self, bucket, vector_index):
         super().__init__(bucket, vectors=True)
+        self.vector_index = vector_index
 
     def upload_vectors(
         self,
         vector_records_list: List[VectorRecord],
-        index_name: str,
         vector_list_size_threshold: int, # Minimally above 100 for efficiency 
         batch_size_divisor: int,
     ):
@@ -41,9 +41,9 @@ class S3VectorStore(BaseStore):
             batch_size = max(1, n // batch_size_divisor)
 
             for batch in self._split_into_batches(vector_records_list_formatted, batch_size):
-                self._put_vectors_helper(index_name, batch)
+                self._put_vectors_helper(batch)
         else:
-            self._put_vectors_helper(index_name, vector_records_list_formatted)
+            self._put_vectors_helper(vector_records_list_formatted)
 
         # Build summary dict for logging successful upserts 
         # to give worker green light to change status to "indexed" in DynamoDB
@@ -52,7 +52,7 @@ class S3VectorStore(BaseStore):
             "total_records": n,
             "batched": n > vector_list_size_threshold,
             "batch_size": batch_size if n > vector_list_size_threshold else n,
-            "index_name": index_name
+            "index_name": self.vector_index
         }
 
         return summary_dict
@@ -65,9 +65,30 @@ class S3VectorStore(BaseStore):
             yield list_to_batch[i : i + batch_size]
     
 
-    def _put_vectors_helper(self, index_name, vectors):
+    def _put_vectors_helper(self, vectors: List[dict[str, Any]]):
         self.s3.client.put_vectors(
             vectorBucketName=self.bucket,
-            indexName=index_name,
+            indexName=self.vector_index,
             vectors=vectors,
+        )        
+
+    def delete_vectors(self, vector_keys_list: List[str]):
+        """
+        Delete vectors from the configured S3 Vector index by key list.
+
+        Args:
+            vector_keys_list: List of vector keys associated with a document.
+
+        Returns:
+            Summary metadata for deletion logging.
+        """
+        self.s3.client.delete_vectors(
+            vectorBucketName=self.bucket,
+            indexName=self.vector_index,
+            keys=vector_keys_list
         )
+        return {
+            "vector_bucket": self.bucket,
+            "vector_index": self.vector_index,
+            "vector_keys": vector_keys_list
+        }

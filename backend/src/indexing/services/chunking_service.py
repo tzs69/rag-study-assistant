@@ -49,7 +49,7 @@ class SemanticChunkingService:
         cleaned_split: list[str] = self.chunker.split_text(cleaned)
 
         # Build list of Chunk objects to be passed as input to 
-        #   A) Chunk uploader service 
+        #   A) s3 chunk store  
         #   B) Embedding service
         chunks_list: list[Chunk] = []
         for idx, chunk_str in enumerate(cleaned_split):

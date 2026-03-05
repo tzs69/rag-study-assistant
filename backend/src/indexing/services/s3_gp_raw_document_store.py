@@ -52,3 +52,15 @@ class S3GPRawDocumentStore(BaseStore):
         stem = filepath.stem
         extension = filepath.suffix
         return f"{self.raw_prefix}/{stem}-{unique_id}{extension}"
+
+
+    def delete_raw_doc(self, doc_id: str):
+        """
+        Takes a raw doc_id, converts it into chunk key format ('chunks/{doc_id}_chunks.jsonl') 
+        and deletes the associated .jsonl object referenced by the built chunk key
+        """
+        doc_id_raw_key=self._build_raw_key(doc_id)
+        self.s3.client.delete_object(
+            Bucket = self.bucket,
+            Key = doc_id_raw_key
+        )

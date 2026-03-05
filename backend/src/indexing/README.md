@@ -1,15 +1,15 @@
-# AWS Ingestion Pipeline (RAG) - Backend Notes
+# Indexing Pipeline (RAG) - Backend Notes
 
-This document describes the current ingestion architecture implemented in this repository and the proposed event-driven pipeline for automatic chunking, embedding, and vector indexing.
+This document describes the current indexing architecture implemented in this repository, including event-driven ingestion and deletion for chunk/vector lifecycle management.
 
 ## Scope
 
-- Folder scope: `backend/src/aws`
+- Folder scope: `backend/src/indexing`
 - App purpose: Accept uploaded documents, store source files in S3, then transform them into indexed vectors for retrieval-augmented generation (RAG).
 - Current status:
   - Upload API to S3 is implemented.
   - AWS session and basic clients are implemented.
-  - Chunking and embedding service files exist but are currently empty and not wired to a background pipeline.
+  - Ingestion and deletion workers are wired to SQS-wrapped S3 events.
 
 ## Current Implementation (As-Is)
 
@@ -20,10 +20,10 @@ This document describes the current ingestion architecture implemented in this r
 - Behavior:
   - Exposes `POST /upload`.
   - Validates that files are present.
-  - Delegates upload work to `S3DocUploaderService`.
+  - Delegates upload work to `S3GPRawDocumentStore`.
 
 2. S3 upload service
-- File: `backend/src/aws/services/s3_uploader_service.py`
+- File: `backend/src/indexing/services/s3_gp_raw_document_store.py`
 - Behavior:
   - Reads each uploaded file body.
   - Writes file to S3 with `put_object`.
@@ -32,32 +32,32 @@ This document describes the current ingestion architecture implemented in this r
 
 3. AWS config and session bootstrap
 - Files:
-  - `backend/src/aws/config.py`
-  - `backend/src/aws/session.py`
+  - `backend/src/indexing/config.py`
+  - `backend/src/indexing/session.py`
 - Behavior:
-  - Loads AWS profile/region/bucket from `.env.local` under `backend/src/aws`.
+  - Loads AWS profile/region/bucket from `.env.local` under `backend/src/indexing`.
   - Creates cached boto3 session.
 
 4. AWS clients
 - Files:
-  - `backend/src/aws/clients/s3_client.py`
-  - `backend/src/aws/clients/bedrock_client.py`
+  - `backend/src/indexing/clients/s3_client.py`
+  - `backend/src/indexing/clients/bedrock_client.py`
 - Behavior:
   - Provide reusable cached clients for S3 and Bedrock Runtime.
 
-5. Reserved service stubs
+5. Indexing services and repositories
 - Files:
-  - `backend/src/aws/services/chunking_service.py`
-  - `backend/src/aws/services/embedding_service.py`
+  - `backend/src/indexing/services/chunking_service.py`
+  - `backend/src/indexing/services/embedding_service.py`
 - Behavior:
-  - Files exist but no logic is implemented yet.
+  - Manifest repository and storage services are used by ingestion/deletion workers.
 
 ### Current runtime flow
 
 1. Client sends multipart files to `POST /upload`.
 2. API reads each file and stores directly into S3 bucket.
 3. Request returns success after upload.
-4. No automatic chunking, embedding, or vector upsert is triggered yet.
+4. Ingestion worker performs chunking, embedding, vector upsert, and manifest finalize.
 
 ## Why Event-Driven Is Preferred Over Bucket-Scan Diff
 
@@ -88,7 +88,7 @@ An S3 event-driven design is simpler operationally at scale:
 [FastAPI POST /upload]  (backend/src/main.py)
       |
       v
-[S3DocUploaderService.put_object]  (backend/src/aws/services/s3_uploader_service.py)
+[S3GPRawDocumentStore.put_object]  (backend/src/indexing/services/s3_gp_raw_document_store.py)
       |
       v
 [Raw Document S3 Bucket]
@@ -131,11 +131,11 @@ An S3 event-driven design is simpler operationally at scale:
 [Deletion Worker]
       |
       +--> Parse event and derive doc_id
-      +--> Read manifest by doc_id (DynamoDB)
-      +--> Get vector keys: docId#0001, docId#0002, ...
+      +--> Claim deletion + fetch vector keys from manifest (DynamoDB)
+      +--> Delete chunk artifact in /chunks
       +--> DeleteVectors(keys=[...]) in vector store
-      +--> Delete manifest record
-      +--> Mark deletion status and ack message
+      +--> Clear vector keys and finalize status to deleted
+      +--> Ack message on success
 ```
 
 ## Proposed Responsibilities By Stage
@@ -335,20 +335,23 @@ Useful structured log fields:
 
 ## Source-of-Truth Snapshot
 
-As of this document, these files represent current implemented ingestion-related logic:
+As of this document, these files represent current implemented indexing-related logic:
 
 - `backend/src/main.py`
-- `backend/src/aws/config.py`
-- `backend/src/aws/session.py`
-- `backend/src/aws/clients/s3_client.py`
-- `backend/src/aws/clients/bedrock_client.py`
-- `backend/src/aws/services/s3_uploader_service.py`
-- `backend/src/aws/services/chunking_service.py` (empty stub)
-- `backend/src/aws/services/embedding_service.py` (empty stub)
+- `backend/src/indexing/config.py`
+- `backend/src/indexing/session.py`
+- `backend/src/indexing/clients/s3_client.py`
+- `backend/src/indexing/clients/bedrock_client.py`
+- `backend/src/indexing/services/s3_gp_raw_document_store.py`
+- `backend/src/indexing/services/chunking_service.py`
+- `backend/src/indexing/services/embedding_service.py`
+- `backend/src/indexing/services/manifest_repository.py`
+- `backend/src/indexing/workers/ingest_lambda_worker.py`
+- `backend/src/indexing/workers/delete_lambda_worker.py`
 
 This README should be updated when:
 
-- queue/notification infrastructure is introduced,
-- worker pipeline is implemented,
-- vector store integration is finalized,
-- manifest-backed deletion flow is implemented.
+- retrieval services are introduced under `backend/src/retrieval`,
+- deletion finalization strategy changes (soft-delete vs hard-delete manifest),
+- indexing contracts (chunk key/vector key schema) change.
+
