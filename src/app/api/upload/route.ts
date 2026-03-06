@@ -17,6 +17,18 @@ export async function POST(request: Request) {
       body: formData,
     });
 
+    if (!backendRes.ok) {
+        const payload = await backendRes.json().catch(() => null) as
+        | { error?: string }
+        | null;
+        const message = payload?.error || `Upload failed (${backendRes.status})`;
+
+        return NextResponse.json(
+            { ok: false, error: message }, 
+            { status: backendRes.status }
+        )
+    }
+
     const text = await backendRes.text();
     const contentType =
       backendRes.headers.get("content-type") ?? "application/json";
