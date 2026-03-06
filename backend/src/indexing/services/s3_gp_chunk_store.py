@@ -5,11 +5,11 @@ from dataclasses import asdict
 from pathlib import PurePosixPath
 from typing import Any, List
 
-from ..chunking_service import Chunk
-from .s3_base_uploader import BaseUploader
+from .chunking_service import Chunk
+from .s3_base_store import BaseStore
 
 
-class S3GPChunkUploaderService(BaseUploader):
+class S3GPChunkStore(BaseStore):
 
     def __init__(self, bucket: str, chunks_prefix: str = "chunks"):
         super().__init__(bucket, vectors=False)
@@ -65,3 +65,20 @@ class S3GPChunkUploaderService(BaseUploader):
                 raise TypeError("Each chunk must be a Chunk object")
             lines.append(json.dumps(payload, ensure_ascii=False))
         return ("\n".join(lines) + "\n").encode("utf-8")
+
+
+    def delete_chunks_for_docid(self, doc_id:str):
+        """
+        Takes a raw doc_id, converts it into chunk key format ('chunks/{doc_id}_chunks.jsonl') 
+        and deletes the associated .jsonl object referenced by the built chunk key
+        """
+        doc_id_chunk_jsonl_key = self._build_chunks_key(doc_id)
+        self.s3.client.delete_object(
+            Bucket=self.bucket,
+            Key=doc_id_chunk_jsonl_key,
+        )
+        return {
+            "doc_id": doc_id,
+            "bucket": self.bucket,
+            "key": doc_id_chunk_jsonl_key
+        }

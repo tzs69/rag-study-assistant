@@ -19,7 +19,7 @@ export default function Home() {
         <Stack direction="row" spacing={2} flexWrap="wrap">
           <Button
             component={Link}
-            href="/upload"
+            href="/knowledge_base"
             variant="contained"
           >
             Upload a document

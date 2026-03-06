@@ -1,36 +1,92 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# RAG Study Assistant
 
-## Getting Started
+A study assistant app that lets users upload source documents, index them for retrieval, and chat against the indexed knowledge base.
 
-First, run the development server:
+This repository contains:
+- a Next.js frontend (`src/`)
+- a FastAPI backend (`backend/src/`)
+- AWS SAM infrastructure for event-driven indexing/deletion (`infra/`)
+
+## Product Scope
+
+- Upload documents (`.pdf`, `.docx`, `.txt`, `.md`)
+- View uploaded documents in a Knowledge Base page
+- Delete uploaded documents
+- Trigger backend ingestion pipeline to chunk, embed, and index content
+- Chat UI for question answering over indexed sources
+
+## Current Status
+
+Implemented:
+- Frontend Knowledge Base flow:
+  - list documents
+  - upload documents
+  - delete documents
+- Next API proxy routes under `src/app/api/**` for backend communication
+- Backend upload/list/delete endpoints in `backend/src/main.py`
+- S3 raw document storage with original filename metadata
+- Event-driven indexing/deletion architecture and worker code under `backend/src/indexing`
+
+In progress / partial:
+- Better UX around ingestion lifecycle states (for example: disable delete while ingesting)
+- More consistent error surfacing and logging strategy across UI + API route layers
+
+Planned next:
+- Surface ingestion status on the Knowledge Base page
+- Add document-level status transitions (`ingesting`, `indexed`, `failed`) to UI
+- Harden API contracts and shared types between frontend/backend
+- Improve observability and test coverage (route contracts + end-to-end flows)
+
+## High-Level Flow
+
+1. User uploads documents from the frontend.
+2. Frontend calls Next API route (`/api/upload`) which proxies to backend (`/upload`).
+3. Backend stores raw docs in S3.
+4. S3 events trigger ingestion/deletion workers (via SQS) for downstream indexing lifecycle.
+5. Frontend fetches document list via `/api/documents`.
+
+## Local Development
+
+### Requirements
+- Node.js + npm
+- Python 3.11+ (recommended for backend)
+- AWS credentials/config for real S3-backed flows
+
+### Run frontend
+From repo root:
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Frontend runs on `http://localhost:3000`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Run backend
+Example from repo root:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+uvicorn backend.src.main:app --reload --port 8000
+```
 
-## Learn More
+Backend runs on `http://127.0.0.1:8000`.
 
-To learn more about Next.js, take a look at the following resources:
+Set frontend env so proxy routes can reach backend:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```env
+BACKEND_URL=http://127.0.0.1:8000
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## API Proxy Routes (Frontend)
 
-## Deploy on Vercel
+- `POST /api/upload` -> backend `/upload`
+- `GET /api/documents` -> backend `/documents`
+- `DELETE /api/documents/:id` -> backend `/documents/{doc_id}`
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Reference Docs
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+For deeper implementation details, see:
+- Backend indexing lifecycle notes: [`backend/src/indexing/README.md`](backend/src/indexing/README.md)
+- Infrastructure/SAM details: [`infra/README.md`](infra/README.md)
+
+This root README is intentionally product-level and cross-cutting; nested READMEs hold subsystem specifics.

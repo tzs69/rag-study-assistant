@@ -1,6 +1,6 @@
 "use client";
 
-import { Container, Typography } from "@mui/material";
+import { Box } from "@mui/material";
 import { useState } from "react";
 import type { ChatMessage } from "@/lib/types/chat";
 import { sendChat } from "@/lib/api/chatApi";
@@ -31,7 +31,7 @@ export default function ChatScreen() {
       const msg = e instanceof Error ? e.message : "Something went wrong.";
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", content: `⚠️ ${msg}` },
+        { role: "assistant", content: `Warning: ${msg}` },
       ]);
     } finally {
       setIsSending(false);
@@ -39,14 +39,11 @@ export default function ChatScreen() {
   }
 
   return (
-    <Container maxWidth="md" sx={{ py: 3 }}>
-      <Typography variant="h5" sx={{ mb: 2, fontWeight: 700 }}>
-        Chat
-      </Typography>
+    <Box sx={{ py: 6 }}>
 
       <MessageList messages={messages} isSending={isSending} />
 
       <ChatComposer disabled={isSending} onSend={handleSend} />
-    </Container>
+    </Box>
   );
 }

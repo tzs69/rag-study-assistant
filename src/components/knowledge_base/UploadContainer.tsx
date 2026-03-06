@@ -1,9 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { Box, Button, Container, Stack, Typography } from "@mui/material";
+import { Box, Button, Paper, Stack, Typography } from "@mui/material";
 
-export default function UploadPage() {
+export default function UploadContainer({
+    onUploadSuccess
+}: {
+    onUploadSuccess: () => void
+}) {
   const [files, setFiles] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -30,22 +34,15 @@ export default function UploadPage() {
         body: formData,
       });
 
-      if (!res.ok) {
-        const payload = await res.json().catch(() => null) as
-          | { error?: string }
-          | null;
-        const message = payload?.error || `Upload failed (${res.status})`;
-        throw new Error(message);
-      }
+      const payload = await res.json();
 
-      const data: {
-        ok: boolean;
-        fileCount: number;
-        files: { name: string; type: string; size: number }[];
-      } = await res.json();
-
-      console.log("Server returned:", data);
-      console.log("Filenames:", data.files.map((f) => f.name));
+			if (!res.ok) {
+				throw new Error(
+						(payload as { error?: string } | null)?.error ?? `Upload failed (${res.status})`,
+				);
+			}
+      
+      onUploadSuccess()
 
       setFiles([]);
     } catch (e: unknown) {
@@ -57,13 +54,13 @@ export default function UploadPage() {
   }
 
   return (
-    <Container maxWidth="sm" sx={{ py: 8 }}>
-      <Stack spacing={3}>
+    <Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 } }}>
+      <Stack spacing={2.5}>
         <Box>
-          <Typography variant="h5" fontWeight={700} gutterBottom>
-            Document Upload Page
+          <Typography variant="h6" fontWeight={700} gutterBottom>
+            Add Documents
           </Typography>
-          <Typography color="text.secondary">
+          <Typography color="text.secondary" variant="body2">
             Only .pdf, .docx, .txt and .md files allowed.
           </Typography>
         </Box>
@@ -71,21 +68,23 @@ export default function UploadPage() {
         <Stack direction="row" spacing={2} alignItems="center">
           <Button variant="outlined" component="label">
             Choose file
-            <input type="file" 
-              multiple 
+            <input
+              type="file"
+              multiple
               accept=".pdf, .docx, .txt, .md"
-              onChange={handleFileChange} 
+              onChange={handleFileChange}
               hidden
             />
           </Button>
           <Typography variant="body2" color="text.secondary">
-            {files.length>0 ? `${files.length} file(s) selected` : "No file selected"}
+            {files.length > 0 ? `${files.length} file(s) selected` : "No file selected"}
           </Typography>
         </Stack>
         <Button
           variant="contained"
           onClick={handleUpload}
           disabled={files.length === 0 || isUploading}
+          sx={{ alignSelf: "flex-start" }}
         >
           {isUploading ? "Uploading..." : "Upload"}
         </Button>
@@ -95,6 +94,6 @@ export default function UploadPage() {
           </Typography>
         ) : null}
       </Stack>
-    </Container>
+    </Paper>
   );
 }

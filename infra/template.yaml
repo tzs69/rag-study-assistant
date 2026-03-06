@@ -241,7 +241,7 @@ Resources:
     Properties:
       FunctionName: !Sub '${ProjectName}-${EnvironmentName}-${IngestionFunctionName}'
       CodeUri: ../backend/src/
-      Handler: aws.workers.ingest_lambda_worker.ingestion_handler
+      Handler: indexing.workers.ingest_lambda_worker.ingestion_handler
       Description: Processes SQS-wrapped S3 create events for raw document ingestion.
       Policies:
         - AWSLambdaBasicExecutionRole
@@ -313,7 +313,7 @@ Resources:
     Properties:
       FunctionName: !Sub '${ProjectName}-${EnvironmentName}-${DeletionFunctionName}'
       CodeUri: ../backend/src/
-      Handler: aws.workers.delete_lambda_worker.deletion_handler
+      Handler: indexing.workers.delete_lambda_worker.deletion_handler
       Description: Processes SQS-wrapped S3 delete events for cleanup.
       Policies:
         - AWSLambdaBasicExecutionRole
