@@ -1,10 +1,13 @@
 # backend/src/main.py
+import logging
+
 from fastapi import FastAPI, UploadFile, File
 from fastapi import HTTPException
 from .indexing.config import settings
 from .indexing.services.s3_gp_raw_document_store import S3GPRawDocumentStore
 
 app = FastAPI()
+logger = logging.getLogger(__name__)
 raw_doc_store = S3GPRawDocumentStore(
     settings.S3_GP_BUCKET_NAME,
     raw_prefix=settings.S3_GP_RAW_PREFIX,
@@ -25,6 +28,7 @@ async def upload(files: list[UploadFile] = File(...)):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
+        logger.exception("Upload failed")
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
 
@@ -38,6 +42,7 @@ def list():
             "documents": docs_data_list
         }
     except Exception as e:
+        logger.exception("List documents failed")
         raise HTTPException(status_code=500, detail=f"List documents failed: {str(e)}")
 
 @app.delete("/documents/{doc_id:path}")
@@ -51,4 +56,5 @@ def delete(doc_id: str):
             "deleted": True
         }
     except Exception as e:
+        logger.exception("Delete document failed for doc_id=%s", doc_id)
         raise HTTPException(status_code=500, detail=f"Failed to delete document {doc_id}: {str(e)}")

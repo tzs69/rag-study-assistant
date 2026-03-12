@@ -5,7 +5,7 @@ from typing import Any
 
 from langchain_experimental.text_splitter import SemanticChunker
 from langchain_aws.embeddings.bedrock import BedrockEmbeddings
-from ..clients.bedrock_client import BedrockClient
+from ...shared.clients.bedrock_client import BedrockClient
 from .document_reader_service import DocumentText
 
 

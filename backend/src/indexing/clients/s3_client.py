@@ -1,6 +1,5 @@
 from functools import lru_cache
-
-from ..session import get_aws_session
+from ...shared.aws_session import get_aws_session
 
 
 @lru_cache(maxsize=1)

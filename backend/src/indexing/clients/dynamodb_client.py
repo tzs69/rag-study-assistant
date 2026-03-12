@@ -1,9 +1,6 @@
 import logging
 from functools import lru_cache
-from typing import Any, Dict, List
-
-from ..session import get_aws_session
-
+from ...shared.aws_session import get_aws_session
 
 @lru_cache(maxsize=1)
 def _get_dynamodb_client():
