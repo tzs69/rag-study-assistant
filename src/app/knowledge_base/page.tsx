@@ -13,50 +13,56 @@ export default function KnowledgeBasePage() {
   const [docs, setDocs] = useState<DocumentData[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  async function refetchDocuments() {
+  async function refreshDocuments() {
     try {
-      const res = await fetch("/api/documents", { method: "GET" });
+      const fetchRes = await fetch(
+        "/api/documents", 
+        { method: "GET" }
+      );
 
-      const payload = await res.json();
+      const documentsBody = await fetchRes.json();
 
-			if (!res.ok) {
+			if (!fetchRes.ok) {
 				throw new Error(
-						(payload as { error?: string } | null)?.error ?? `Documents fetch failed (${res.status})`,
+          (documentsBody as { error?: string } | null)?.error 
+            ?? `Document(s) fetch failed (${fetchRes.status})`,
 				);
 			}
       
-      const documents = (payload as { documents?: DocumentData[] } | null)?.documents ?? [];
+      const documents = (documentsBody as { documents?: DocumentData[] } | null)?.documents ?? [];
       setDocs(documents)
 
     } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : "Documents fetch failed.";
-      setError(message);
+      const errorMessage = e instanceof Error ? e.message : "Documents fetch failed.";
+      setError(errorMessage);
     }
   }
 
-  async function deleteSingleDocument(documentData: DocumentData): Promise<void> {
+  async function deleteDocument(documentData: DocumentData): Promise<void> {
     try {
-      const res = await fetch(`/api/documents/${encodeURIComponent(documentData.docId)}`, {
-        method: "DELETE"
-      })
+      const deleteRes = await fetch(
+        `/api/documents/${encodeURIComponent(documentData.docId)}`, 
+        { method: "DELETE" }
+      );
 
-      const payload = await res.json();
+      const deleteBody = await deleteRes.json();
 
-			if (!res.ok) {
+			if (!deleteRes.ok) {
 				throw new Error(
-						(payload as { error?: string } | null)?.error ?? `Delete failed (${res.status})`,
+          (deleteBody as { error?: string } | null)?.error 
+            ?? `Document delete failed (${deleteRes.status})`,
 				);
 			}
 
-      await refetchDocuments()
+      await refreshDocuments()
     } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : "Delete failed.";
-      setError(message);
+      const errorMessage = e instanceof Error ? e.message : "Delete failed.";
+      setError(errorMessage);
     }
   }
 
   useEffect(() => {
-    refetchDocuments();
+    refreshDocuments();
   }, []);
 
 
@@ -65,8 +71,8 @@ export default function KnowledgeBasePage() {
       <BackButton>Back</BackButton>
       <Stack spacing={3}  sx={{ py: 3 }}>
         {error ? <Alert severity="error">{error}</Alert> : null}
-        <DocumentsDisplay docs={docs} onDelete={deleteSingleDocument}/>
-        <UploadContainer onUploadSuccess={refetchDocuments}/>
+        <DocumentsDisplay docs={docs} onDelete={deleteDocument}/>
+        <UploadContainer onUploadSuccess={refreshDocuments}/>
       </Stack>
     </Container>
   );

@@ -12,12 +12,13 @@ export default function UploadContainer({
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const selected = e.target.files ? Array.from(e.target.files) : [];
-    setFiles(selected);
+  function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const selectedFiles = 
+      event.target.files ? Array.from(event.target.files) : [];
+    setFiles(selectedFiles);
 
     // allow re-selecting the same file later
-    e.currentTarget.value = "";
+    event.currentTarget.value = "";
   }
 
   async function handleUpload() {
@@ -29,25 +30,25 @@ export default function UploadContainer({
       const formData = new FormData();
       files.forEach((file) => formData.append("files", file));
 
-      const res = await fetch("/api/upload", {
+      const uploadRes = await fetch("/api/upload", {
         method: "POST",
         body: formData,
       });
 
-      const payload = await res.json();
+      const uploadBody = await uploadRes.json();
 
-			if (!res.ok) {
+			if (!uploadRes.ok) {
 				throw new Error(
-						(payload as { error?: string } | null)?.error ?? `Upload failed (${res.status})`,
+          (uploadBody as { error?: string } | null)?.error 
+            ?? `Document(s) upload failed (${uploadRes.status})`,
 				);
 			}
       
       onUploadSuccess()
-
       setFiles([]);
     } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : "Upload failed.";
-      setError(message);
+      const errorMessage = e instanceof Error ? e.message : "Upload failed.";
+      setError(errorMessage);
     } finally {
       setIsUploading(false);
     }

@@ -8,15 +8,23 @@ import ChatComposer from "@/components/chat/ChatComposer";
 import BackButton from "@/components/shared/BackButton";
 
 export default function ChatPage() {
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    { role: "assistant", content: "Hello! Ask me anything about your uploaded file(s)." },
-  ]);
+
+  const [messages, setMessages] = useState<ChatMessage[]>([{ 
+    role: "assistant", 
+    content: "Hello! Ask me anything about your uploaded file(s)." 
+  }]);
   const [isSending, setIsSending] = useState(false);
   
   async function handleSend(userQuery: string) {
     if (isSending) return;
     
-    const nextMessages: ChatMessage[] = [...messages, { role: "user", content: userQuery }];
+    const nextMessages: ChatMessage[] = [
+      ...messages, 
+      { 
+        role: "user", 
+        content: userQuery 
+      }
+    ];
     setMessages(nextMessages)
     setIsSending(true);
 
@@ -28,29 +36,37 @@ export default function ChatPage() {
     try {
       const chatRes = await fetch("/api/chat", {
         method: "POST",
-        headers: {
-          "Content-Type":"application/json"
-        },
+        headers: { "Content-Type":"application/json" },
         body: JSON.stringify(chatRequest)
       });
 
-      const chatResponse = await chatRes.json() as { answer?: string };
+      const chatResponseBody = await chatRes.json();
 
 			if (!chatRes.ok) {
 				throw new Error(
-						(chatResponse as { error?: string } | null)?.error ?? `Delete failed (${chatRes.status})`,
+          (chatResponseBody as { error?: string } | null)?.error 
+            ?? `Chat failed (status ${chatRes.status})`,
 				);
 			}
 
-      const assistantReply = chatResponse.answer ?? "(No answer returned)";
+      const assistantReply = chatResponseBody.answer ?? "(No answer returned)";
 
-      setMessages((prev) => [...prev, { role: "assistant", content: assistantReply }]);
+      setMessages((prev) => [
+        ...prev, 
+        { 
+          role: "assistant", 
+          content: assistantReply 
+        }
+      ]);
 
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Chat request failed.";
+      const errorMessage = e instanceof Error ? e.message : "Chat request failed.";
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", content: `Warning: ${msg}` },
+        { 
+          role: "assistant", 
+          content: `Warning: ${errorMessage}` 
+        },
       ]);
     } finally {
       setIsSending(false);

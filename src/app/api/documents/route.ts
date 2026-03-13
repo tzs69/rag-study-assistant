@@ -17,26 +17,32 @@ export async function GET() {
     });
     
     if (!backendRes.ok) {
-			const payload = await backendRes.json().catch(() => null) as
+			const errorBody = await backendRes.json().catch(() => null) as
 			| { error?: string }
 			| null;
-			const message = payload?.error || `Documents GET failed (${backendRes.status})`;
+			const errorMessage = errorBody?.error 
+      || `Failed to fetch documents (status ${backendRes.status})`;
 
 			return NextResponse.json(
-				{ ok: false, error: message }, 
+				{ ok: false, error: errorMessage }, 
 				{ status: backendRes.status }
 			)
     }
     
     const documentData = await backendRes.json();
 
-    return NextResponse.json(documentData, {
-      status: backendRes.status,
-    });
+    return NextResponse.json(
+      documentData, 
+      { status: backendRes.status }
+    );
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Failed to reach backend documents listing service";
+    const errorMessage =
+      error instanceof Error 
+      ? error.message : "Failed to reach backend document listing service";
 
-    return NextResponse.json({ ok: false, error: message }, { status: 502 });
+    return NextResponse.json(
+      { ok: false, error: errorMessage }, 
+      { status: 502 }
+    );
   }
 }
