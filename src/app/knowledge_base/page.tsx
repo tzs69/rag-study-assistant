@@ -37,7 +37,7 @@ export default function KnowledgeBasePage() {
   async function deleteSingleDocument(documentData: DocumentData): Promise<void> {
     try {
       const res = await fetch(`/api/documents/${encodeURIComponent(documentData.docId)}`, {
-        method: `DELETE`
+        method: "DELETE"
       })
 
       const payload = await res.json();
@@ -61,9 +61,9 @@ export default function KnowledgeBasePage() {
 
 
   return (
-    <Container maxWidth="md">
+    <Container maxWidth="md" sx={{ py: 2 }}>
       <BackButton>Back</BackButton>
-      <Stack spacing={3}  sx={{ py: 6 }}>
+      <Stack spacing={3}  sx={{ py: 3 }}>
         {error ? <Alert severity="error">{error}</Alert> : null}
         <DocumentsDisplay docs={docs} onDelete={deleteSingleDocument}/>
         <UploadContainer onUploadSuccess={refetchDocuments}/>
