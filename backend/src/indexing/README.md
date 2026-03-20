@@ -33,15 +33,17 @@ This document describes the current indexing architecture implemented in this re
 3. AWS config and session bootstrap
 - Files:
   - `backend/src/indexing/config.py`
-  - `backend/src/indexing/session.py`
+  - `backend/src/shared/config.py`
+  - `backend/src/shared/aws_session.py`
 - Behavior:
-  - Loads AWS profile/region/bucket from `.env.local` under `backend/src/indexing`.
+  - Loads indexing-specific config from `.env.local` under `backend/src/indexing`.
+  - Loads shared AWS profile/region config from `.env.local` under `backend/src/shared`.
   - Creates cached boto3 session.
 
 4. AWS clients
 - Files:
   - `backend/src/indexing/clients/s3_client.py`
-  - `backend/src/indexing/clients/bedrock_client.py`
+  - `backend/src/shared/clients/bedrock_client.py`
 - Behavior:
   - Provide reusable cached clients for S3 and Bedrock Runtime.
 
@@ -339,9 +341,10 @@ As of this document, these files represent current implemented indexing-related 
 
 - `backend/src/main.py`
 - `backend/src/indexing/config.py`
-- `backend/src/indexing/session.py`
+- `backend/src/shared/config.py`
+- `backend/src/shared/aws_session.py`
+- `backend/src/shared/clients/bedrock_client.py`
 - `backend/src/indexing/clients/s3_client.py`
-- `backend/src/indexing/clients/bedrock_client.py`
 - `backend/src/indexing/services/s3_gp_raw_document_store.py`
 - `backend/src/indexing/services/chunking_service.py`
 - `backend/src/indexing/services/embedding_service.py`
