@@ -18,13 +18,13 @@ This folder contains the AWS infrastructure (SAM/CloudFormation) for the backend
 
 The template currently deploys these handlers:
 
-- `backend/src/aws/workers/ingest_lambda_worker.py` -> `ingestion_handler`
-- `backend/src/aws/workers/delete_lambda_worker.py` -> `deletion_handler`
+- `backend/src/indexing/workers/ingest_lambda_worker.py` -> `ingestion_handler`
+- `backend/src/indexing/workers/delete_lambda_worker.py` -> `deletion_handler`
 
 In SAM:
 
-- `IngestionFunction` handler: `aws.workers.ingest_lambda_worker.ingestion_handler`
-- `DeletionFunction` handler: `aws.workers.delete_lambda_worker.deletion_handler`
+- `IngestionFunction` handler: `indexing.workers.ingest_lambda_worker.ingestion_handler`
+- `DeletionFunction` handler: `indexing.workers.delete_lambda_worker.deletion_handler`
 
 ## Naming Convention
 
