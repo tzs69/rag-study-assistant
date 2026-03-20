@@ -1,14 +1,23 @@
 # backend/src/main.py
+import logging
+
+from pydantic import BaseModel
 from fastapi import FastAPI, UploadFile, File
 from fastapi import HTTPException
-from .indexing.config import settings
+from typing import List, Literal, Optional
+from .indexing.config import settings as indexing_settings
 from .indexing.services.s3_gp_raw_document_store import S3GPRawDocumentStore
 
 app = FastAPI()
+logger = logging.getLogger(__name__)
 raw_doc_store = S3GPRawDocumentStore(
-    settings.S3_GP_BUCKET_NAME,
-    raw_prefix=settings.S3_GP_RAW_PREFIX,
+    bucket=indexing_settings.S3_GP_BUCKET_NAME,
+    raw_prefix=indexing_settings.S3_GP_RAW_PREFIX,
 )
+
+# ==================================================================================
+#             INDEXING ENTRY POINTS
+# ==================================================================================
 
 @app.post("/upload")
 async def upload(files: list[UploadFile] = File(...)):
@@ -25,6 +34,7 @@ async def upload(files: list[UploadFile] = File(...)):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
+        logger.exception("Upload failed")
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
 
@@ -38,6 +48,7 @@ def list():
             "documents": docs_data_list
         }
     except Exception as e:
+        logger.exception("List documents failed")
         raise HTTPException(status_code=500, detail=f"List documents failed: {str(e)}")
 
 @app.delete("/documents/{doc_id:path}")
@@ -51,4 +62,38 @@ def delete(doc_id: str):
             "deleted": True
         }
     except Exception as e:
+        logger.exception(f"Delete document failed for doc_id={doc_id}")
         raise HTTPException(status_code=500, detail=f"Failed to delete document {doc_id}: {str(e)}")
+
+
+# ==================================================================================
+#             RETRIEVAL CLASSES & ENTRY POINTS
+# ==================================================================================
+
+class ChatMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str
+
+class ChatRequest(BaseModel):
+    message: str
+    history: Optional[List[ChatMessage]] = None
+
+class ChatResponse(BaseModel):
+    answer: str
+
+@app.post("/chat", response_model=ChatResponse)
+def chat(req: ChatRequest):
+    try:
+        user_query = req.message.strip()
+        if not user_query:
+            raise HTTPException(status_code=400, detail="message is required")
+
+        # placeholder for now
+        answer = f"{user_query} testing_123"
+        return ChatResponse(answer=answer)
+
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Chat request failed")
+        raise HTTPException(status_code=500, detail="Chat request failed")

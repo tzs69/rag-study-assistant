@@ -1,8 +1,5 @@
-import logging
 from functools import lru_cache
-from typing import Any, Dict, List
-
-from ..session import get_aws_session
+from ..aws_session import get_aws_session
 
 
 @lru_cache(maxsize=1)
@@ -14,7 +11,8 @@ def _get_bedrock_client():
 class BedrockClient:
     """
     Reusable BedrockClient for  
-    - Embeddings
+    - Semantic Chunking
+    - Generating Embeddings
     - Conversational Querys
     """
     def __init__(self, model_id):

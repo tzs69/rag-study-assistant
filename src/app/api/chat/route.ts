@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
+import type { ChatResponse } from "@/lib/types/chat";
 
-export async function GET() {
-  try {
+export async function POST(req: Request) {
+  try{
+    const chatRequest = await req.json();
     const backendUrl = process.env.BACKEND_URL;
 
     if (!backendUrl) {
@@ -11,34 +13,39 @@ export async function GET() {
       );
     }
 
-    const backendRes = await fetch(`${backendUrl}/documents`, {
-      method: "GET",
-      cache: "no-store",
-    });
-    
+    const backendRes = await fetch(
+      `${backendUrl}/chat`, 
+      {
+        method: "POST",
+        headers: { "Content-Type":"application/json" },
+        body: JSON.stringify(chatRequest)
+      }
+    );
+
     if (!backendRes.ok) {
 			const errorBody = await backendRes.json().catch(() => null) as
 			| { error?: string }
 			| null;
 			const errorMessage = errorBody?.error 
-      || `Failed to fetch documents (status ${backendRes.status})`;
+      || `Chat request failed (status ${backendRes.status})`;
 
 			return NextResponse.json(
 				{ ok: false, error: errorMessage }, 
 				{ status: backendRes.status }
 			)
     }
-    
-    const documentData = await backendRes.json();
+
+    const chatResponse: Partial<ChatResponse> = await backendRes.json()
 
     return NextResponse.json(
-      documentData, 
+      { answer: chatResponse.answer }, 
       { status: backendRes.status }
     );
+
   } catch (error) {
     const errorMessage =
       error instanceof Error 
-      ? error.message : "Failed to reach backend document listing service";
+      ? error.message : "Failed to reach backend chat service";
 
     return NextResponse.json(
       { ok: false, error: errorMessage }, 
@@ -46,3 +53,4 @@ export async function GET() {
     );
   }
 }
+

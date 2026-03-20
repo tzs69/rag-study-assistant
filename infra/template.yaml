@@ -240,8 +240,8 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub '${ProjectName}-${EnvironmentName}-${IngestionFunctionName}'
-      CodeUri: ../backend/src/
-      Handler: indexing.workers.ingest_lambda_worker.ingestion_handler
+      CodeUri: ../backend/
+      Handler: src.indexing.workers.ingest_lambda_worker.ingestion_handler
       Description: Processes SQS-wrapped S3 create events for raw document ingestion.
       Policies:
         - AWSLambdaBasicExecutionRole
@@ -312,8 +312,8 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub '${ProjectName}-${EnvironmentName}-${DeletionFunctionName}'
-      CodeUri: ../backend/src/
-      Handler: indexing.workers.delete_lambda_worker.deletion_handler
+      CodeUri: ../backend/
+      Handler: src.indexing.workers.delete_lambda_worker.deletion_handler
       Description: Processes SQS-wrapped S3 delete events for cleanup.
       Policies:
         - AWSLambdaBasicExecutionRole

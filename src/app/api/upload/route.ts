@@ -18,29 +18,31 @@ export async function POST(request: Request) {
     });
 
     if (!backendRes.ok) {
-        const payload = await backendRes.json().catch(() => null) as
+        const errorBody = await backendRes.json().catch(() => null) as
         | { error?: string }
         | null;
-        const message = payload?.error || `Upload failed (${backendRes.status})`;
+        const errorMessage = errorBody?.error 
+        || `Failed to upload document(s) (status ${backendRes.status})`;
 
         return NextResponse.json(
-            { ok: false, error: message }, 
+            { ok: false, error: errorMessage }, 
             { status: backendRes.status }
         )
     }
 
-    const text = await backendRes.text();
-    const contentType =
-      backendRes.headers.get("content-type") ?? "application/json";
+    return NextResponse.json(
+      { ok: true }, 
+      { status: backendRes.status }
+    );
 
-    return new NextResponse(text, {
-      status: backendRes.status,
-      headers: { "content-type": contentType },
-    });
   } catch (error) {
     const message =
-      error instanceof Error ? error.message : "Failed to reach backend upload service";
+      error instanceof Error 
+      ? error.message : "Failed to reach backend document upload service";
 
-    return NextResponse.json({ ok: false, error: message }, { status: 502 });
+    return NextResponse.json(
+      { ok: false, error: message }, 
+      { status: 502 }
+    );
   }
 }

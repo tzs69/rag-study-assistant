@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 
 from langchain_aws.embeddings.bedrock import BedrockEmbeddings
 
-from ..clients.bedrock_client import BedrockClient
+from ...shared.clients.bedrock_client import BedrockClient
 from .chunking_service import Chunk
 
 

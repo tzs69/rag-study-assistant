@@ -234,15 +234,17 @@ def ingestion_handler(event, context):
                 raise RuntimeError(f"Vector embedding generation or vector upload failed for doc_id='{doc_id}'") from e
             
 
-            # Finalize ingestion by updating manifest with vector keys and transitioning status to `indexed`
+            # Finalize ingestion by updating manifest row with vector keys, changing status `indexed` and incrementing overall corpus version
             try:
                 finalize_ingestion_response = manifest_repository.update_vectors_finalize_ingestion(
                     doc_id=doc_id, req_id=req_id, vector_records_list=vector_payloads
                 )
+                corpus_state = manifest_repository.increment_corpus_version()
                 logger.info(json.dumps(
                     {
                         "event": "ingestion_finalize_success", 
                         **finalize_ingestion_response, 
+                        "corpus_version": corpus_state.get("corpus_version"),
                         "aws_request_id": req_id
                     }
                 ))

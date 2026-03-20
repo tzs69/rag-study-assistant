@@ -188,15 +188,17 @@ def deletion_handler(event, context):
                     manifest_repository.mark_manifest_failed(doc_id=doc_id, ingest=False, error_message=str(e))
                     raise RuntimeError(f"Chunk vectors delete failed for doc_id='{doc_id}'") from e
                 
-            # Finalize deletion by clearing all vector keys for manifest row and updating status to `deleted`
+            # Finalize deletion by clearing all vector keys for manifest row, updating status to `deleted` and incrementing overall corpus version
             try:
                 finalize_deletion_response = manifest_repository.clear_vectors_finalize_deletion(
                     doc_id=doc_id, req_id=req_id
                 )
+                corpus_state = manifest_repository.increment_corpus_version()
                 logger.info(json.dumps(
                     {
                         "event": "deletion_finalize_success", 
                         **finalize_deletion_response, 
+                        "corpus_version": corpus_state.get("corpus_version"),
                         "aws_request_id": req_id
                     }
                 ))

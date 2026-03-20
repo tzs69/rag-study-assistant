@@ -22,14 +22,14 @@ export default function Home() {
             href="/knowledge_base"
             variant="contained"
           >
-            Upload a document
+            Knowledge Base
           </Button>
           <Button
             component={Link}
             href="/chat"
-            variant="outlined"
+            variant="contained"
           >
-            Go to chat
+            Chat
           </Button>
         </Stack>
       </Stack>
