@@ -3,10 +3,10 @@ import logging
 from urllib.parse import unquote_plus
 from ..services.document_reader_service import DocumentReaderService, DocumentText
 from ..services.manifest_repository import ManifestRepository
-from ..services.s3_gp_chunk_store import S3GPChunkStore
-from ..services.chunking_service import SemanticChunkingService, Chunk
-from ..services.embedding_service import EmbeddingService, VectorRecord
-from ..services.s3_vector_store import S3VectorStore
+from ...shared.services.s3_gp_chunk_store import S3GPChunkStore, Chunk
+from ..services.chunking_service import SemanticChunkingService
+from ..services.embedding_service import EmbeddingService
+from ...shared.services.s3_vector_store import S3VectorStore, VectorRecord
 from ...shared.services.corpus_change_table import CorpusChangeTable
 from ..config import settings
 
@@ -26,7 +26,8 @@ def ingestion_handler(event, context):
     2. Retrieves the document from S3 and processes it (e.g., text extraction, chunking).
     3. Generates vector embeddings for the processed document chunks.
     4. Stores the vector embeddings in the S3 vector bucket.
-    5. Creates a manifest entry in DynamoDB to keep track of the ingested document and its associated vector data.
+    5. Finalizes manifest state in DynamoDB for the ingested document and its associated vector data.
+    6. Appends a corpus-change record for retrieval freshness checks.
 
     Args:
         event (dict): The event data containing information about the S3 create action.

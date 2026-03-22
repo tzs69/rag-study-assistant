@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, List, Optional
 from botocore.exceptions import ClientError
 
 from ...shared.clients.dynamodb_client import DyanmoDBClient
-from .embedding_service import VectorRecord
+from ...shared.services.s3_vector_store import VectorRecord
 
 class ManifestRepository:
     """

@@ -1,22 +1,12 @@
-"""
-Embedding service to generate vectors from chunked text
- - Includes
-"""
 from __future__ import annotations
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional 
+from typing import List 
 
 from langchain_aws.embeddings.bedrock import BedrockEmbeddings
 
 from ...shared.clients.bedrock_client import BedrockClient
-from .chunking_service import Chunk
+from ...shared.services.s3_gp_chunk_store import Chunk
+from ...shared.services.s3_vector_store import VectorRecord
 
-
-@dataclass(frozen=True)
-class VectorRecord:
-    key: str
-    data: Dict[str, List[float]]
-    metadata: Optional[Dict[str, Any]] = None
 
 class EmbeddingService:
     """

@@ -11,7 +11,7 @@ from pathlib import PurePosixPath
 from typing import Any, Dict, List
 import uuid
 
-from .s3_base_store import BaseStore
+from ...shared.services.s3_base_store import BaseStore
 
 
 class S3GPRawDocumentStore(BaseStore):

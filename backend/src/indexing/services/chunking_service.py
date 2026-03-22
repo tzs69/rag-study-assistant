@@ -1,20 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
 
 from langchain_experimental.text_splitter import SemanticChunker
 from langchain_aws.embeddings.bedrock import BedrockEmbeddings
 from ...shared.clients.bedrock_client import BedrockClient
 from .document_reader_service import DocumentText
-
-
-@dataclass(frozen=True)
-class Chunk:
-    doc_id: str
-    chunk_id: str
-    text: str
-
+from ...shared.services.s3_gp_chunk_store import Chunk
 
 class SemanticChunkingService:
     """

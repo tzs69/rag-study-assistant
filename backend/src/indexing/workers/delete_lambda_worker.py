@@ -6,8 +6,8 @@ logger.setLevel(logging.INFO)
 from urllib.parse import unquote_plus
 from ..services.s3_gp_raw_document_store import S3GPRawDocumentStore
 from ..services.manifest_repository import ManifestRepository
-from ..services.s3_gp_chunk_store import S3GPChunkStore
-from ..services.s3_vector_store import S3VectorStore
+from ...shared.services.s3_gp_chunk_store import S3GPChunkStore
+from ...shared.services.s3_vector_store import S3VectorStore
 from ...shared.services.corpus_change_table import CorpusChangeTable
 
 from ..config import settings
@@ -22,6 +22,7 @@ def deletion_handler(event, context):
     3. Deletes the chunk artifact from the general-purpose S3 bucket.
     4. Deletes associated vectors from the S3 Vector index.
     5. Finalizes deletion by clearing vector keys and transitioning manifest status to `deleted`.
+    6. Appends a corpus-change record for retrieval freshness checks.
 
     Args:
         event (dict): The event data containing information about the S3 delete action.

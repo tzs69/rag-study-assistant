@@ -5,7 +5,7 @@ from io import BytesIO
 from pathlib import PurePosixPath
 
 from botocore.exceptions import ClientError, ParamValidationError
-from ..clients.s3_client import S3ClientModular
+from ...shared.clients.s3_client import S3ClientModular
 
 from pypdf import PdfReader
 from docx import Document as DocxDocument
@@ -50,9 +50,10 @@ class DocumentReaderService:
         try:
             response = self.s3.client.get_object(Bucket=self.bucket, Key=doc_id)
 
-            # Extract raw file bytes from response
+            # Extract raw file bytes and then text from response
             raw_bytes = response["Body"].read()
             text = self._extract_text(doc_id=doc_id, raw_bytes=raw_bytes)
+            text_normalized = " ".join((text or "").split())
 
             # Build DocumentText object to be passed as input to chunking service
             content_type = response.get("ContentType", "application/octet-stream")
@@ -60,7 +61,7 @@ class DocumentReaderService:
                 doc_id=doc_id,
                 bucket=self.bucket,
                 content_type=content_type,
-                text=self._normalize_text(text),
+                text=text_normalized,
             )
         
         except ParamValidationError as e:
@@ -109,8 +110,3 @@ class DocumentReaderService:
 
         doc = DocxDocument(BytesIO(raw_bytes))
         return "\n".join(paragraph.text for paragraph in doc.paragraphs)
-
-    @staticmethod
-    def _normalize_text(text: str) -> str:
-        """"""
-        return " ".join((text or "").split())

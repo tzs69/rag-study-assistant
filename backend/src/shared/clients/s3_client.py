@@ -1,5 +1,5 @@
 from functools import lru_cache
-from ...shared.aws_session import get_aws_session
+from ..aws_session import get_aws_session
 
 
 @lru_cache(maxsize=1)
@@ -15,7 +15,7 @@ def _get_s3_client_modular(vectors:bool):
 
 class S3ClientModular:
     """
-    Reusable S3Client for uploads into GP buckets (raw pdf docs) & vector buckets  
+    Reusable S3Client for uploads into GP buckets & vector buckets  
     """
     def __init__(self, s3_bucket_name: str, vectors: bool):
         self.s3_bucket_name = s3_bucket_name

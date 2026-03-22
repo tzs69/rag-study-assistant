@@ -88,7 +88,7 @@ BACKEND_URL=http://127.0.0.1:8000
 
 For deeper implementation details, see:
 - Backend indexing lifecycle notes: [`backend/src/indexing/README.md`](backend/src/indexing/README.md)
-- Retrieval service implementation: [`backend/src/retrieval/services/llm_service.py`](backend/src/retrieval/services/llm_service.py)
+- Retrieval service implementation: `backend/src/retrieval/` (services and orchestrator)
 - Infrastructure/SAM details: [`infra/README.md`](infra/README.md)
 
 This root README is intentionally product-level and cross-cutting; nested READMEs hold subsystem specifics.

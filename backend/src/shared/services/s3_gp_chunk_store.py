@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from pathlib import PurePosixPath
 from typing import Any, List
 
-from .chunking_service import Chunk
 from .s3_base_store import BaseStore
+
+
+@dataclass(frozen=True)
+class Chunk:
+    doc_id: str
+    chunk_id: str
+    text: str
 
 
 class S3GPChunkStore(BaseStore):
