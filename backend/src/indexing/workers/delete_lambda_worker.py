@@ -8,6 +8,8 @@ from ..services.s3_gp_raw_document_store import S3GPRawDocumentStore
 from ..services.manifest_repository import ManifestRepository
 from ..services.s3_gp_chunk_store import S3GPChunkStore
 from ..services.s3_vector_store import S3VectorStore
+from ...shared.services.corpus_change_table import CorpusChangeTable
+
 from ..config import settings
 
 def deletion_handler(event, context):
@@ -46,6 +48,7 @@ def deletion_handler(event, context):
     manifest_repository = ManifestRepository(table_name=settings.DYNAMODB_MANIFEST_TABLE_NAME)      
     chunk_store = S3GPChunkStore(bucket=settings.S3_GP_BUCKET_NAME, chunks_prefix=settings.S3_GP_CHUNK_PREFIX)
     vector_store = S3VectorStore(bucket=settings.S3_VECTOR_BUCKET_NAME, vector_index=settings.S3_VECTOR_INDEX_NAME)
+    corpus_change_table = CorpusChangeTable(table_name=settings.DYNAMODB_CORPUS_CHANGE_TABLE_NAME)
 
     for sqs_deletion_record in sqs_delete_events_list:
         sqs_message_id = sqs_deletion_record.get("messageId")
@@ -188,17 +191,19 @@ def deletion_handler(event, context):
                     manifest_repository.mark_manifest_failed(doc_id=doc_id, ingest=False, error_message=str(e))
                     raise RuntimeError(f"Chunk vectors delete failed for doc_id='{doc_id}'") from e
                 
-            # Finalize deletion by clearing all vector keys for manifest row, updating status to `deleted` and incrementing overall corpus version
+            # Finalize deletion by clearing all vector keys for manifest row and updating status to `deleted`
             try:
                 finalize_deletion_response = manifest_repository.clear_vectors_finalize_deletion(
                     doc_id=doc_id, req_id=req_id
                 )
-                corpus_state = manifest_repository.increment_corpus_version()
+
+                corpus_change_response=corpus_change_table.add_change_record(doc_id=doc_id, op="delete")
+
                 logger.info(json.dumps(
                     {
                         "event": "deletion_finalize_success", 
                         **finalize_deletion_response, 
-                        "corpus_version": corpus_state.get("corpus_version"),
+                        **corpus_change_response,
                         "aws_request_id": req_id
                     }
                 ))

@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional
 from botocore.exceptions import ClientError
 
-from ..clients.dynamodb_client import DyanmoDBClient
+from ...shared.clients.dynamodb_client import DyanmoDBClient
 from .embedding_service import VectorRecord
 
 class ManifestRepository:
@@ -29,49 +29,7 @@ class ManifestRepository:
 
         self.table_name = table_name
         self.dynamodb = DyanmoDBClient(table_name)
-        self._corpus_state_doc_id = "__CORPUS_STATE__"
 
-    def increment_corpus_version(self) -> Dict[str, Any]:
-        """
-        Atomically bump a global corpus version stored in a reserved manifest row.
-
-        This is used by retrieval services to cheaply detect when corpus contents
-        have changed and an in-memory keyword index should be rebuilt.
-        """
-        updated_at = datetime.now(timezone.utc).isoformat()
-        response = self.dynamodb.client.update_item(
-            TableName=self.table_name,
-            Key={"doc_id": {"S": self._corpus_state_doc_id}},
-            UpdateExpression="SET #u = :u ADD #cv :one",
-            ExpressionAttributeNames={"#u": "updated_at", "#cv": "corpus_version"},
-            ExpressionAttributeValues={
-                ":u": {"S": updated_at},
-                ":one": {"N": "1"},
-            },
-            ReturnValues="ALL_NEW",
-        )
-
-        attrs = response.get("Attributes", {})
-        version_attr = attrs.get("corpus_version", {})
-        version = int(version_attr.get("N", "0"))
-        return {"doc_id": self._corpus_state_doc_id, "corpus_version": version, "updated_at": updated_at}
-
-    def get_corpus_version(self) -> int:
-        """
-        Read global corpus version from reserved manifest row.
-        Returns 0 when state row does not yet exist.
-        """
-        response = self.dynamodb.client.get_item(
-            TableName=self.table_name,
-            Key={"doc_id": {"S": self._corpus_state_doc_id}},
-            ConsistentRead=True,
-        )
-        item = response.get("Item")
-        if not item:
-            return 0
-
-        version_attr = item.get("corpus_version", {})
-        return int(version_attr.get("N", "0"))
 
     def claim_reclaim_ingestion(self, doc_id: str, bucket: str, req_id: str) -> Dict[str, Any]:
         """

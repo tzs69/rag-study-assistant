@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     S3_VECTOR_BUCKET_NAME: Optional[str] = None
 
     DYNAMODB_MANIFEST_TABLE_NAME: Optional[str] = None
+    DYNAMODB_CORPUS_CHANGE_TABLE_NAME: Optional[str] = None
 
     CHUNKING_MODEL_ID: Optional[str] = None
     EMBEDDING_MODEL_ID: Optional[str] = None

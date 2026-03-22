@@ -7,6 +7,7 @@ from ..services.s3_gp_chunk_store import S3GPChunkStore
 from ..services.chunking_service import SemanticChunkingService, Chunk
 from ..services.embedding_service import EmbeddingService, VectorRecord
 from ..services.s3_vector_store import S3VectorStore
+from ...shared.services.corpus_change_table import CorpusChangeTable
 from ..config import settings
 
 from typing import List
@@ -54,7 +55,8 @@ def ingestion_handler(event, context):
     chunk_store = S3GPChunkStore(bucket=settings.S3_GP_BUCKET_NAME, chunks_prefix=settings.S3_GP_CHUNK_PREFIX)
     embedding_service = EmbeddingService(embedding_model_id=settings.EMBEDDING_MODEL_ID)
     vector_store = S3VectorStore(bucket=settings.S3_VECTOR_BUCKET_NAME, vector_index=settings.S3_VECTOR_INDEX_NAME)
-    
+    corpus_change_table = CorpusChangeTable(table_name=settings.DYNAMODB_CORPUS_CHANGE_TABLE_NAME)
+
     for sqs_ingestion_record in event["Records"]:
         sqs_message_id = sqs_ingestion_record.get("messageId")
 
@@ -234,17 +236,19 @@ def ingestion_handler(event, context):
                 raise RuntimeError(f"Vector embedding generation or vector upload failed for doc_id='{doc_id}'") from e
             
 
-            # Finalize ingestion by updating manifest row with vector keys, changing status `indexed` and incrementing overall corpus version
+            # Finalize ingestion by updating manifest row with vector keys, changing status `indexed`
             try:
                 finalize_ingestion_response = manifest_repository.update_vectors_finalize_ingestion(
                     doc_id=doc_id, req_id=req_id, vector_records_list=vector_payloads
                 )
-                corpus_state = manifest_repository.increment_corpus_version()
+
+                corpus_change_response=corpus_change_table.add_change_record(doc_id=doc_id, op="upsert")
+
                 logger.info(json.dumps(
                     {
                         "event": "ingestion_finalize_success", 
                         **finalize_ingestion_response, 
-                        "corpus_version": corpus_state.get("corpus_version"),
+                        **corpus_change_response,
                         "aws_request_id": req_id
                     }
                 ))

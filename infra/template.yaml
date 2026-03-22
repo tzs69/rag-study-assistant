@@ -38,7 +38,10 @@ Parameters:
 
   DynamoManifestTableName:
     Type: String
-    Default: rag-doc-vector-manifest
+    Default: document-vector-manifest-sam
+  DynamoCorpusChangeTableName:
+    Type: String
+    Default: corpus-change-table-sam
 
   IngestionQueueName:
     Type: String
@@ -90,6 +93,7 @@ Globals:
         S3_GP_CHUNK_PREFIX: !Ref ChunksPrefix
         S3_VECTOR_BUCKET_NAME: !Sub '${ProjectName}-${EnvironmentName}-${S3VectorBucketName}' 
         DYNAMODB_MANIFEST_TABLE_NAME: !Ref ManifestTable
+        DYNAMODB_CORPUS_CHANGE_TABLE_NAME: !Ref CorpusChangeTable
         CHUNKING_MODEL_ID: !Ref ChunkingModelId
         EMBEDDING_MODEL_ID: !Ref EmbeddingModelId
         S3_VECTOR_INDEX_NAME: !Sub '${ProjectName}-${EnvironmentName}-${S3VectorIndexName}'
@@ -231,7 +235,25 @@ Resources:
           KeyType: HASH
       SSESpecification:
         SSEEnabled: true
-        
+  
+  CorpusChangeTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${ProjectName}-${EnvironmentName}-${DynamoCorpusChangeTableName}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: change_id
+          AttributeType: N
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: change_id
+          KeyType: RANGE
+      SSESpecification:
+        SSEEnabled: true
+
 # ---------------------------------------------------------------------
 # Lambda Resources (Ingestion and Deletion Functions)
 # ---------------------------------------------------------------------
@@ -280,7 +302,7 @@ Resources:
                 - s3vectors:ListIndexes
               Resource:
                 - !GetAtt S3VectorBucket.VectorBucketArn
-            - Sid: DynamoManifestRW
+            - Sid: ReadWriteDocVectorManifest
               Effect: Allow
               Action:
                 - dynamodb:PutItem
@@ -288,6 +310,12 @@ Resources:
                 - dynamodb:GetItem
                 - dynamodb:DeleteItem
               Resource: !GetAtt ManifestTable.Arn
+            - Sid: ReadWriteCorpusChangeTable
+              Effect: Allow
+              Action: 
+                - dynamodb:Query
+                - dynamodb:PutItem
+              Resource: !GetAtt CorpusChangeTable.Arn
             - Sid: BedrockInvoke
               Effect: Allow
               Action:
@@ -350,13 +378,19 @@ Resources:
                 - s3vectors:ListIndexes
               Resource:
                 - !GetAtt S3VectorBucket.VectorBucketArn
-            - Sid: DynamoManifestRW
+            - Sid: ReadWriteDocVectorManifest
               Effect: Allow
               Action:
                 - dynamodb:GetItem
                 - dynamodb:DeleteItem
                 - dynamodb:UpdateItem
               Resource: !GetAtt ManifestTable.Arn
+            - Sid: ReadWriteCorpusChangeTable
+              Effect: Allow
+              Action: 
+                - dynamodb:Query
+                - dynamodb:PutItem
+              Resource: !GetAtt CorpusChangeTable.Arn
             # TODO: add s3vectors delete permissions once final index resource ARN is known.
       Events:
         DeletionQueueEvent:
