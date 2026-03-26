@@ -230,9 +230,18 @@ Resources:
       AttributeDefinitions:
         - AttributeName: doc_id
           AttributeType: S
+        - AttributeName: status
+          AttributeType: S
       KeySchema:
         - AttributeName: doc_id
           KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: status-index
+          KeySchema:
+            - AttributeName: status
+              KeyType: HASH
+          Projection:
+            ProjectionType: KEYS_ONLY          
       SSESpecification:
         SSEEnabled: true
   
