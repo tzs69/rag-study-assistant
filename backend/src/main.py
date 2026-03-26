@@ -7,12 +7,20 @@ from fastapi import HTTPException
 from typing import List, Literal, Optional
 from .indexing.config import settings as indexing_settings
 from .indexing.services.s3_gp_raw_document_store import S3GPRawDocumentStore
+from .retrieval.config import settings as retrieval_settings
+from .retrieval.retrieval_orchestrator import RetrievalOrchestrator
 
 app = FastAPI()
 logger = logging.getLogger(__name__)
 raw_doc_store = S3GPRawDocumentStore(
     bucket=indexing_settings.S3_GP_BUCKET_NAME,
     raw_prefix=indexing_settings.S3_GP_RAW_PREFIX,
+)
+retrieval_orchestrator = RetrievalOrchestrator(
+    manifest_table_name=retrieval_settings.DYNAMODB_MANIFEST_TABLE_NAME,
+    corpus_change_table_name=retrieval_settings.DYNAMODB_CORPUS_CHANGE_TABLE_NAME,
+    s3_gp_bucket_name=retrieval_settings.S3_GP_BUCKET_NAME,
+    chunks_prefix=retrieval_settings.S3_GP_CHUNK_PREFIX
 )
 
 # ==================================================================================
@@ -67,7 +75,7 @@ def delete(doc_id: str):
 
 
 # ==================================================================================
-#             RETRIEVAL CLASSES & ENTRY POINTS
+#             RETRIEVAL CLASSES & ENTRY POINT
 # ==================================================================================
 
 class ChatMessage(BaseModel):
@@ -85,11 +93,15 @@ class ChatResponse(BaseModel):
 def chat(req: ChatRequest):
     try:
         user_query = req.message.strip()
+        # message_history = req.history.strip()
         if not user_query:
             raise HTTPException(status_code=400, detail="message is required")
 
         # placeholder for now
-        answer = f"{user_query} testing_123"
+        # answer = f"{user_query} testing_123"
+        retrieval_orchestrator.refresh_documents_if_stale()
+
+        answer = str(retrieval_orchestrator.chunk_index.doc_chunk_index.values())
         return ChatResponse(answer=answer)
 
     except HTTPException:

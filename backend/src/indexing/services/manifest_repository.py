@@ -287,18 +287,52 @@ class ManifestRepository:
         }
 
 
-    def delete_manifest_record(self, doc_id: str) -> Dict[str, Any]:
+    def fetch_indexed_docids(self) -> List[str]:
         """
-        Hard-delete a manifest record by `doc_id`.
-
-        Typically used as a cleanup utility when permanent manifest removal is desired.
+        Helper function for quick lookup of all indexed doc_ids 
+        
+        - Utilizes client.query if table contains status-index GSI
+        - For tables without status-index GSI, falls back to client.scan
         """
-        self._validate_doc_id(doc_id)
+        try:
+            response = self.dynamodb.client.query(
+                TableName=self.table_name,
+                IndexName="status-index",
+                KeyConditionExpression="#s = :s",
+                ExpressionAttributeNames={"#s": "status"},
+                ExpressionAttributeValues={":s": {"S": "indexed"}}
+            )
 
-        self.dynamodb.client.delete_item(
-            TableName=self.table_name,
-            Key={"doc_id": {"S": doc_id}},
-        )
-        return {"doc_id": doc_id, "table_name": self.table_name, "deleted": True}
+            items: List[Dict[str, Dict[str, str]]] = response.get("Items", [])
+        except ClientError as e:
+            error = e.response.get("Error", {})
+            is_missing_status_index = (
+                error.get("Code") == "ValidationException"
+                and "status-index" in str(error.get("Message", ""))
+            )
+            if not is_missing_status_index:
+                raise
 
-    
+            # Fallback for tables that do not have the optional status-index GSI.
+            items = []
+            scan_kwargs: Dict[str, Any] = {
+                "TableName": self.table_name,
+                "FilterExpression": "#s = :s",
+                "ExpressionAttributeNames": {"#s": "status"},
+                "ExpressionAttributeValues": {":s": {"S": "indexed"}},
+            }
+            while True:
+                page = self.dynamodb.client.scan(**scan_kwargs)
+                items.extend(page.get("Items", []))
+                last_evaluated_key = page.get("LastEvaluatedKey")
+                if not last_evaluated_key:
+                    break
+                scan_kwargs["ExclusiveStartKey"] = last_evaluated_key
+
+        indexed_docids = [
+            item["doc_id"]["S"]
+            for item in items
+            if "doc_id" in item and "S" in item["doc_id"]
+        ]
+
+        return indexed_docids
