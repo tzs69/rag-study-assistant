@@ -11,10 +11,11 @@ This folder contains the AWS infrastructure (SAM/CloudFormation) for the backend
 - Lambda ingestion worker + deletion worker
 - Lambda event source mappings (SQS -> Lambda)
 - DynamoDB manifest table (`doc_id` keyed)
+- DynamoDB corpus change table (`pk + change_id` keyed change stream)
 - S3 Vectors vector bucket + vector index
 - IAM policies for S3 / SQS / DynamoDB / Bedrock / S3 Vectors worker access
 
-## Handler Entrypoints (current)
+## Handler Entrypoints
 
 The template currently deploys these handlers:
 
@@ -39,7 +40,7 @@ Examples:
 - Vector index: `${ProjectName}-${EnvironmentName}-${S3VectorIndexName}`
 - Queues / DLQs / Lambdas / DynamoDB table follow the same pattern
 
-Because of this, `samconfig.toml` should store **suffix/base** values (for example `document-upload-sam`), not already-prefixed full names.
+Because of this, `samconfig.toml` stores **suffix/base** values (for example `document-upload-sam`), not already-prefixed full names.
 
 ## Lambda Environment Variables (current)
 
@@ -51,6 +52,7 @@ SAM injects app runtime env vars into both Lambda workers, including:
 - `S3_VECTOR_BUCKET_NAME` (actual created vector bucket name)
 - `S3_VECTOR_INDEX_NAME` (actual created vector index name)
 - `DYNAMODB_MANIFEST_TABLE_NAME` (actual created DynamoDB table name)
+- `DYNAMODB_CORPUS_CHANGE_TABLE_NAME` (actual created DynamoDB table name)
 - `CHUNKING_MODEL_ID`
 - `EMBEDDING_MODEL_ID`
 
@@ -60,9 +62,9 @@ SAM injects app runtime env vars into both Lambda workers, including:
 2. S3 emits `ObjectCreated:*`
 3. S3 sends notification to ingestion SQS queue
 4. Ingestion Lambda is invoked via SQS event source mapping
-5. (To be implemented in handler) process document -> chunk -> embed -> upsert vectors -> write manifest
+5. Ingestion handler processes document -> chunk -> embed -> upsert vectors -> update manifest -> append corpus change record
 6. On delete (`ObjectRemoved:*`), S3 sends event to deletion queue
-7. Deletion Lambda is invoked and performs cleanup (manifest + vectors/chunks)
+7. Deletion handler performs cleanup (manifest + vectors/chunks) and appends corpus change record
 
 ## Local Workflow (Windows / SAM)
 
@@ -73,30 +75,37 @@ cd infra
 sam validate -t template.yaml --lint
 ```
 
-Build:
-
-If `.aws-sam/` is locked (common on Windows/OneDrive), build outside the repo:
+To build artifacts (before deploy):
 
 ```powershell
-sam build --build-dir C:\temp\rag-sam-build
+# First time
+sam build -t template.yaml
+
+# Subsequent iterations (delete previous build artifacts, then rebuild)
+Remove-Item .aws-sam -Recurse -Force
+sam build -t template.yaml
 ```
 
-Deploy:
+To deploy the SAM:
 
 ```powershell
-sam deploy --profile <your-profile>
+# First time
+sam deploy --profile <aws-profile>
 ```
-
-If using external build dir:
 
 ```powershell
-sam deploy --template-file C:\temp\rag-sam-build\template.yaml --profile <your-profile>
+# Subsequent iterations
+sam deploy --guided --profile <aws-profile> --template-file .aws-sam/build/template.yaml --config-file <absolute-path-to>\infra\samconfig.toml
 ```
+
+Notes:
+- `Remove-Item .aws-sam -Recurse -Force` must run from the `infra/` directory.
+- If PowerShell blocks folder removal due to lock/permissions, close any process using `.aws-sam/` and retry.
+- Replace `<aws-profile>` and `<absolute-path-to>` with values from your local environment.
 
 ## Notes / Remaining Work
 
-- Worker handler implementations are still stubs (`ingest_lambda_worker.py`, `delete_lambda_worker.py`)
-- `infra/env/dev-params.example.txt` may need syncing if template parameter names change
-- Consider adding `.aws-sam/` to `.gitignore` (generated build artifacts should not be committed)
-- Consider explicit CloudWatch log group resources if you want stack deletion to remove logs too
-- For destructive teardown behavior, ensure buckets/vector resources are empty before deleting the stack
+- Keep `infra/env/dev-params.example.txt` in sync whenever template parameter names change.
+- Keep `samconfig.toml` aligned with current deploy flags/profile and template path usage.
+- If stack replacement is needed, clean up stack-associated managed artifact bucket in CloudFormation before redeploy.
+- For destructive teardown behavior, ensure S3/vector resources are empty before stack deletion.

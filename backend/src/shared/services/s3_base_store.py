@@ -1,5 +1,5 @@
 """
-Provides a shared base class for indexing persistence stores backed by S3-compatible clients.
+Provides a shared base class for S3-backed persistence stores used across app modules.
 """
 from ..clients.s3_client import S3ClientModular
 

@@ -1,11 +1,18 @@
 """
 Persistence service for writing document vectors into the configured S3 Vector bucket/index.
 """
-from typing import Any, Dict, List
-from dataclasses import asdict
+from typing import Any, Dict, List, Optional
+from dataclasses import asdict, dataclass
 
 from .s3_base_store import BaseStore
-from .embedding_service import VectorRecord
+
+
+@dataclass(frozen=True)
+class VectorRecord:
+    key: str
+    data: Dict[str, List[float]]
+    metadata: Optional[Dict[str, Any]] = None
+    
 
 class S3VectorStore(BaseStore):
     def __init__(self, bucket, vector_index):

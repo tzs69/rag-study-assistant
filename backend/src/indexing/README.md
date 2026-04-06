@@ -10,6 +10,9 @@ This document describes the current indexing architecture implemented in this re
   - Upload API to S3 is implemented.
   - AWS session and basic clients are implemented.
   - Ingestion and deletion workers are wired to SQS-wrapped S3 events.
+  - Corpus change tracking is implemented via DynamoDB change records on ingest/delete finalize.
+  - BM25 update events are published from ingest/delete workers to a dedicated SQS queue.
+  - BM25 update worker is implemented and maintains latest BM25 snapshot + pointer in S3.
 
 ## Current Implementation (As-Is)
 
@@ -33,15 +36,17 @@ This document describes the current indexing architecture implemented in this re
 3. AWS config and session bootstrap
 - Files:
   - `backend/src/indexing/config.py`
-  - `backend/src/indexing/session.py`
+  - `backend/src/shared/config.py`
+  - `backend/src/shared/aws_session.py`
 - Behavior:
-  - Loads AWS profile/region/bucket from `.env.local` under `backend/src/indexing`.
+  - Loads indexing-specific config from `.env.local` under `backend/src/indexing`.
+  - Loads shared AWS profile/region config from `.env.local` under `backend/src/shared`.
   - Creates cached boto3 session.
 
 4. AWS clients
 - Files:
-  - `backend/src/indexing/clients/s3_client.py`
-  - `backend/src/indexing/clients/bedrock_client.py`
+  - `backend/src/shared/clients/s3_client.py`
+  - `backend/src/shared/clients/bedrock_client.py`
 - Behavior:
   - Provide reusable cached clients for S3 and Bedrock Runtime.
 
@@ -49,8 +54,12 @@ This document describes the current indexing architecture implemented in this re
 - Files:
   - `backend/src/indexing/services/chunking_service.py`
   - `backend/src/indexing/services/embedding_service.py`
+  - `backend/src/indexing/services/manifest_repository.py`
+  - `backend/src/shared/services/corpus_change_table.py`
+  - `backend/src/shared/services/s3_gp_chunk_store.py`
+  - `backend/src/shared/services/s3_vector_store.py`
 - Behavior:
-  - Manifest repository and storage services are used by ingestion/deletion workers.
+  - Ingestion/deletion workers use manifest + shared storage services and append corpus change events.
 
 ### Current runtime flow
 
@@ -58,29 +67,18 @@ This document describes the current indexing architecture implemented in this re
 2. API reads each file and stores directly into S3 bucket.
 3. Request returns success after upload.
 4. Ingestion worker performs chunking, embedding, vector upsert, and manifest finalize.
+5. Ingestion/deletion finalization appends a corpus change record (`upsert`/`delete`) used by retrieval freshness checks.
+6. Ingestion/deletion workers publish BM25 update events (`doc_id`, `op`, `corpus_version`) to BM25 update queue.
+7. BM25 update worker consumes queue events, applies corpus deltas, and writes:
+   - `bm25/snapshot.json` (latest snapshot; source-of-truth artifact that retrieval reads to serve non-stale keyword search results)
+   - `bm25/latest.json` (latest pointer metadata)
 
-## Why Event-Driven Is Preferred Over Bucket-Scan Diff
-
-A bucket scan approach (maintaining a local list and diffing objects after each upload) works for a prototype but is weaker for production:
-
-- Performance cost grows with object count (frequent list operations).
-- Race conditions when multiple uploads happen concurrently.
-- Harder idempotency and duplicate prevention.
-- Harder recovery/retry semantics.
-
-An S3 event-driven design is simpler operationally at scale:
-
-- Work is triggered per object creation event.
-- Natural async boundary with queue-based retries.
-- Cleaner failure handling via dead-letter queue.
-- Easier horizontal scaling of workers.
-
-## Proposed Target Pipeline (Event-Driven)
+## Current Pipeline (Event-Driven)
 
 ### High-level workflow diagram
 
 ```text
-                    CURRENT IMPLEMENTED PATH
+                    INDEXING PIPELINE
 
 [User/Frontend]
       |
@@ -119,7 +117,7 @@ An S3 event-driven design is simpler operationally at scale:
 [Retriever] -> [Vector Store] -> [LLM answer synthesis]
 
 
-                    DELETION PIPELINE (MANIFEST-BASED)
+                    DELETION PIPELINE 
 
 [Raw Document S3 Bucket]
       |
@@ -134,30 +132,45 @@ An S3 event-driven design is simpler operationally at scale:
       +--> Claim deletion + fetch vector keys from manifest (DynamoDB)
       +--> Delete chunk artifact in /chunks
       +--> DeleteVectors(keys=[...]) in vector store
-      +--> Clear vector keys and finalize status to deleted
-      +--> Ack message on success
+	      +--> Clear vector keys and finalize status to deleted
+	      +--> Ack message on success
+
+
+                    BM25 UPDATE PIPELINE
+
+[Ingestion Worker]--------+
+                          |
+[Deletion Worker]---------+--> [BM25 Update SQS Queue] -----> [DLQ]
+                                        |
+                                        v
+                                 [BM25 Update Worker]
+                                        |
+                                        +--> Parse/validate queue payloads
+                                        +--> Compare target_version vs bm25/latest.json
+                                        +--> Warm-start from bm25/snapshot.json (if exists)
+                                        +--> Fallback bootstrap from manifest indexed docs
+                                        +--> Apply corpus deltas from corpus-change table
+                                        +--> Validate BM25 build
+                                        +--> Write bm25/snapshot.json
+                                        +--> Write bm25/latest.json
 ```
 
-## Proposed Responsibilities By Stage
+## Implemented Pipeline Stages
 
-### Stage 1: Upload 
+### Document upload 
 
-- Keep upload endpoint thin and synchronous.
-- Responsibility is only to accept files and place them in S3 reliably.
-- Do not block user request on chunking/embedding latency.
+- Accept files and place them in S3 reliably.
+- Does not block user request on chunking/embedding latency.
 
-### Stage 2: Notification and queue transport
+### Notification and queue transport
 
-- S3 emits object-created events.
-- Event is sent to SQS queue (preferred) instead of direct compute trigger.
-- Queue settings should include:
-  - Visibility timeout sized to max processing time.
-  - Redrive policy to DLQ after max receives.
-  - Message retention for operational recovery window.
+- S3 emits object-created events and object-removed events.
+- Instead if direct compute triggers, S3-emitted events are sent to appropriate SQS queues for further action by workers down the line.
 
-### Stage 3: Async ingestion worker
+### Document ingestion handling (post-upload)
 
-Worker should be a pure orchestrator with clear substeps:
+Document ingestion process is handled by a documnet ingestion lambda worker coordinating across different services.
+Worker is implemented as a pure orchestrator with these substeps:
 
 1. Parse event message
 - Extract bucket, object key, version id (or ETag), event timestamp.
@@ -188,12 +201,14 @@ Worker should be a pure orchestrator with clear substeps:
 7. State tracking
 - Record status transitions: `received -> processing -> indexed`.
 - On failure: `failed` plus error class and retry count.
+- Persist corpus-level change stream records (`change_id`, `doc_id`, `op`, `updated_at`) on successful finalize.
 
-### Stage 4: Document deletion handling (manifest-based)
+### Document deletion handling
 
-Because this application does not rely on Bedrock Knowledge Bases, vector lifecycle must be handled explicitly when a raw document is removed.
+Document deletion process is handled by a document deletion lambda worker.
+Because this application does not rely on Bedrock Knowledge Bases, vector lifecycle is handled explicitly when a raw document is removed.
 
-Recommended design:
+Current design:
 
 1. Keep a vector manifest per document
 - During ingestion, create deterministic vector keys per chunk:
@@ -208,130 +223,20 @@ Recommended design:
 - Resolve `docId` from the S3 event/object key mapping.
 - Look up manifest for that `docId`.
 - Call vector store delete API with all keys from manifest.
-- Remove the manifest record after successful vector deletion.
+- Finalize manifest by clearing `vector_keys` and setting status to `deleted`.
 
 4. Make delete flow idempotent
 - If manifest is missing, treat as already cleaned.
-- Repeated delete events should safely no-op.
+- Repeated delete events safely no-op.
 - Record deletion outcomes for observability/auditing.
 
-## Chunking Strategy Guidance (for implementation)
+## Next Milestones
 
-Recommended baseline strategy:
-
-- Chunk by tokens (not characters) for model-aligned limits.
-- Start with medium chunk size and moderate overlap.
-- Keep stable chunk identity scheme:
-  - `chunk_id = <doc_id>:<section_or_page>:<ordinal>`
-- Preserve metadata for retrieval filtering and citation:
-  - doc name/key
-  - page/section
-  - source URI
-  - ingest timestamp
-
-Good defaults to start testing:
-
-- Chunk size: 400-800 tokens
-- Overlap: 10-20%
-- Tune based on retrieval quality and context window constraints.
-
-## Idempotency and Update Semantics
-
-Use object identity fields to avoid duplicate indexing:
-
-- Primary key suggestion: `(bucket, key, version_id)`
-- If versioning is disabled, fallback to `(bucket, key, etag)`
-
-Define clear behavior for re-uploads:
-
-- Same key + new content:
-  - Re-index and replace existing vectors for that document key.
-- Same event delivered multiple times:
-  - Detect as duplicate and no-op.
-
-Define clear behavior for document deletes:
-
-- Delete event for existing document:
-  - Delete all vectors listed in manifest, then delete manifest record.
-- Delete event replay / duplicate:
-  - If manifest does not exist, treat as already deleted (no-op).
-- Re-upload after delete:
-  - Create a fresh manifest and new vector keys for the new document version.
-
-## Error Handling Model
-
-Classify failures:
-
-1. Transient (retryable)
-- Bedrock throttling/timeouts
-- Temporary S3/network failures
-- Queue consumer timeouts
-
-2. Permanent (non-retryable)
-- Unsupported file format
-- Corrupt/empty document after extraction
-- Invalid event payload
-- Missing manifest schema compatibility (if manifest format is invalid)
-
-Operational behavior:
-
-- Retry transient errors through queue redelivery.
-- Route poison messages to DLQ after max retries.
-- Emit structured logs for each stage with correlation fields.
-- Keep separate metrics for ingestion failures vs deletion cleanup failures.
-
-## Security and IAM Considerations
-
-Minimum required access:
-
-- Uploader/API:
-  - `s3:PutObject` on raw document bucket.
-- Worker:
-  - `sqs:ReceiveMessage`, `sqs:DeleteMessage`, `sqs:ChangeMessageVisibility`
-  - `s3:GetObject` on raw document bucket
-  - `dynamodb:GetItem`, `dynamodb:PutItem`, `dynamodb:DeleteItem` on manifest table
-  - Bedrock invoke permissions for embedding model
-  - Vector store write/delete permissions
-
-Additional controls:
-
-- Restrict IAM resources to explicit ARNs.
-- Enable server-side encryption on bucket/queue/store.
-- Keep PII-sensitive metadata minimized.
-
-## Observability Checklist
-
-Track these metrics for production readiness:
-
-- Queue depth and age of oldest message
-- Worker success/failure rates
-- End-to-end indexing latency (upload -> indexed)
-- Embedding throughput and error rate
-- Duplicate event rate and idempotent skips
-- Deletion lag (delete event -> vectors removed)
-- Orphan vector rate (vectors without manifest)
-
-Useful structured log fields:
-
-- `bucket`, `object_key`, `version_id/etag`
-- `message_id`
-- `doc_id`
-- `chunk_count`
-- `embedding_batch_count`
-- `index_status`
-- `manifest_key_count`
-- `delete_status`
-
-## Suggested Near-Term Milestones
-
-1. Implement chunking and embedding service logic in existing stub files.
-2. Add worker entrypoint and event parser.
-3. Add queue-backed processing loop with retries and DLQ policy.
-4. Integrate vector store client and upsert contract.
-5. Add idempotency/state persistence.
-6. Add tests for event parsing, idempotency, and end-to-end ingestion.
-7. Add manifest persistence and deletion worker for S3 `ObjectRemoved` events.
-8. Add tests for duplicate delete events and orphan-manifest recovery.
+1. Add end-to-end tests for BM25 event publish on ingest/delete success paths.
+2. Add failure-mode tests for BM25 worker retry behavior and partial-batch failures.
+3. Add observability dashboards for BM25 queue lag, snapshot publish latency, and pointer version drift.
+4. Add optional periodic reconciliation job to rebuild snapshot from manifest for drift recovery.
+5. Add structured alerting on BM25 snapshot publish failures and DLQ growth.
 
 ## Source-of-Truth Snapshot
 
@@ -339,19 +244,34 @@ As of this document, these files represent current implemented indexing-related 
 
 - `backend/src/main.py`
 - `backend/src/indexing/config.py`
-- `backend/src/indexing/session.py`
-- `backend/src/indexing/clients/s3_client.py`
-- `backend/src/indexing/clients/bedrock_client.py`
+- `backend/src/shared/config.py`
+- `backend/src/shared/aws_session.py`
+- `backend/src/shared/clients/bedrock_client.py`
+- `backend/src/shared/clients/s3_client.py`
+- `backend/src/shared/services/s3_base_store.py`
+- `backend/src/shared/services/s3_gp_chunk_store.py`
+- `backend/src/shared/services/s3_vector_store.py`
+- `backend/src/shared/services/corpus_change_table.py`
 - `backend/src/indexing/services/s3_gp_raw_document_store.py`
 - `backend/src/indexing/services/chunking_service.py`
 - `backend/src/indexing/services/embedding_service.py`
 - `backend/src/indexing/services/manifest_repository.py`
+- `backend/src/indexing/clients/sqs_client.py`
+- `backend/src/indexing/services/bm25_update_event_publisher.py`
+- `backend/src/indexing/services/indexed_documents_loader.py`
+- `backend/src/indexing/services/latest_chunk_index_loader.py`
 - `backend/src/indexing/workers/ingest_lambda_worker.py`
 - `backend/src/indexing/workers/delete_lambda_worker.py`
+- `backend/src/indexing/workers/bm25_update_lambda_worker.py`
+- `backend/src/shared/services/chunk_loader.py`
+- `backend/src/shared/services/chunk_index.py`
+- `backend/src/shared/services/corpus_delta_applier.py`
+- `backend/src/shared/services/corpus_monitor.py`
 
 This README should be updated when:
 
-- retrieval services are introduced under `backend/src/retrieval`,
+- retrieval-side corpus monitor/index refresh contracts are finalized under `backend/src/retrieval`,
+- BM25 snapshot contract (schema keys, pointer semantics, key names) changes,
 - deletion finalization strategy changes (soft-delete vs hard-delete manifest),
 - indexing contracts (chunk key/vector key schema) change.
 

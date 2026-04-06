@@ -1,20 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
 
 from langchain_experimental.text_splitter import SemanticChunker
 from langchain_aws.embeddings.bedrock import BedrockEmbeddings
 from ...shared.clients.bedrock_client import BedrockClient
 from .document_reader_service import DocumentText
-
-
-@dataclass(frozen=True)
-class Chunk:
-    doc_id: str
-    chunk_id: str
-    text: str
-
+from ...shared.services.s3_gp_chunk_store import Chunk
+from ...shared.utils.parse_docid import extract_doc_id_from_raw_key
 
 class SemanticChunkingService:
     """
@@ -27,7 +20,11 @@ class SemanticChunkingService:
             client=bedrock.client,
             model_id=bedrock.model_id,
         )
-        self.chunker = SemanticChunker(self.embeddings_model)
+        self.chunker = SemanticChunker(
+            self.embeddings_model,
+            breakpoint_threshold_type="percentile",
+            breakpoint_threshold_amount=90,    
+        )
 
     def build_semantic_chunks_from_doctext(self, doctext: DocumentText) -> list[Chunk]:
         """
@@ -53,7 +50,7 @@ class SemanticChunkingService:
         #   B) Embedding service
         chunks_list: list[Chunk] = []
         for idx, chunk_str in enumerate(cleaned_split):
-            chunk_id = f"{doc_id}#{idx + 1:04d}"
+            chunk_id = f"{extract_doc_id_from_raw_key(doc_id)}_chunk_{idx + 1:04d}"
 
             chunks_list.append(
                 Chunk(

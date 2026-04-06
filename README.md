@@ -23,7 +23,7 @@ Implemented:
   - upload documents
   - delete documents
 - Next API proxy routes under `src/app/api/**` for backend communication
-- Backend upload/list/delete endpoints in `backend/src/main.py`
+- Backend upload/list/delete/chat endpoints in `backend/src/main.py`
 - S3 raw document storage with original filename metadata
 - Event-driven indexing/deletion architecture and worker code under `backend/src/indexing`
 
@@ -82,11 +82,13 @@ BACKEND_URL=http://127.0.0.1:8000
 - `POST /api/upload` -> backend `/upload`
 - `GET /api/documents` -> backend `/documents`
 - `DELETE /api/documents/:id` -> backend `/documents/{doc_id}`
+- `POST /api/chat` -> backend `/chat`
 
 ## Reference Docs
 
 For deeper implementation details, see:
 - Backend indexing lifecycle notes: [`backend/src/indexing/README.md`](backend/src/indexing/README.md)
+- Retrieval service implementation: `backend/src/retrieval/` (services and orchestrator)
 - Infrastructure/SAM details: [`infra/README.md`](infra/README.md)
 
 This root README is intentionally product-level and cross-cutting; nested READMEs hold subsystem specifics.

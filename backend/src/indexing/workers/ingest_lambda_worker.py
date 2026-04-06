@@ -3,10 +3,12 @@ import logging
 from urllib.parse import unquote_plus
 from ..services.document_reader_service import DocumentReaderService, DocumentText
 from ..services.manifest_repository import ManifestRepository
-from ..services.s3_gp_chunk_store import S3GPChunkStore
-from ..services.chunking_service import SemanticChunkingService, Chunk
-from ..services.embedding_service import EmbeddingService, VectorRecord
-from ..services.s3_vector_store import S3VectorStore
+from ...shared.services.s3_gp_chunk_store import S3GPChunkStore, Chunk
+from ..services.chunking_service import SemanticChunkingService
+from ..services.embedding_service import EmbeddingService
+from ...shared.services.s3_vector_store import S3VectorStore, VectorRecord
+from ...shared.services.corpus_change_table import CorpusChangeTable
+from ..services.bm25_update_event_publisher import BM25UpdateEventService
 from ..config import settings
 
 from typing import List
@@ -25,7 +27,8 @@ def ingestion_handler(event, context):
     2. Retrieves the document from S3 and processes it (e.g., text extraction, chunking).
     3. Generates vector embeddings for the processed document chunks.
     4. Stores the vector embeddings in the S3 vector bucket.
-    5. Creates a manifest entry in DynamoDB to keep track of the ingested document and its associated vector data.
+    5. Finalizes manifest state in DynamoDB for the ingested document and its associated vector data.
+    6. Appends a corpus-change record for retrieval freshness checks.
 
     Args:
         event (dict): The event data containing information about the S3 create action.
@@ -54,7 +57,9 @@ def ingestion_handler(event, context):
     chunk_store = S3GPChunkStore(bucket=settings.S3_GP_BUCKET_NAME, chunks_prefix=settings.S3_GP_CHUNK_PREFIX)
     embedding_service = EmbeddingService(embedding_model_id=settings.EMBEDDING_MODEL_ID)
     vector_store = S3VectorStore(bucket=settings.S3_VECTOR_BUCKET_NAME, vector_index=settings.S3_VECTOR_INDEX_NAME)
-    
+    corpus_change_table = CorpusChangeTable(table_name=settings.DYNAMODB_CORPUS_CHANGE_TABLE_NAME)
+    bm25_update_message_sender = BM25UpdateEventService(queue_url=settings.SQS_BM25_UPDATE_QUEUE_URL)
+
     for sqs_ingestion_record in event["Records"]:
         sqs_message_id = sqs_ingestion_record.get("messageId")
 
@@ -234,17 +239,19 @@ def ingestion_handler(event, context):
                 raise RuntimeError(f"Vector embedding generation or vector upload failed for doc_id='{doc_id}'") from e
             
 
-            # Finalize ingestion by updating manifest row with vector keys, changing status `indexed` and incrementing overall corpus version
+            # Finalize ingestion by updating manifest row with vector keys, changing status `indexed`
             try:
                 finalize_ingestion_response = manifest_repository.update_vectors_finalize_ingestion(
                     doc_id=doc_id, req_id=req_id, vector_records_list=vector_payloads
                 )
-                corpus_state = manifest_repository.increment_corpus_version()
+
+                corpus_change_response=corpus_change_table.add_change_record(doc_id=doc_id, op="upsert")
+
                 logger.info(json.dumps(
                     {
                         "event": "ingestion_finalize_success", 
                         **finalize_ingestion_response, 
-                        "corpus_version": corpus_state.get("corpus_version"),
+                        **corpus_change_response,
                         "aws_request_id": req_id
                     }
                 ))
@@ -254,3 +261,28 @@ def ingestion_handler(event, context):
                 )
                 manifest_repository.mark_manifest_failed(doc_id=doc_id, ingest=True, error_message=str(e))
                 raise RuntimeError(f"Ingestion finalization failed for doc_id='{doc_id}'") from e
+            
+
+            # after finalize + corpus_change_response acquired
+            bm25_update_sqs_payload = {
+                "op": "upsert", 
+                "doc_id": doc_id,
+                "corpus_version": corpus_change_response["change_id"],
+            }
+
+            try:
+                bm25_update_message_sender.publish_bm25_update_event_to_queue(bm25_update_sqs_payload)
+                logger.info(json.dumps({
+                    "event": "bm25_update_event_publish_success",
+                    "doc_id": doc_id,
+                    "corpus_version": bm25_update_sqs_payload["corpus_version"],
+                    "sqs_message_id": sqs_message_id,
+                    "aws_request_id": req_id
+                }))
+            except Exception:
+                logger.exception(
+                    f"BM25 update event publish failed (doc_id={doc_id} corpus_version={bm25_update_sqs_payload['corpus_version']} sqs_message_id={sqs_message_id} aws_request_id={req_id})"
+                )
+
+
+                
