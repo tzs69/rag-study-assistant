@@ -8,6 +8,7 @@ from ..services.chunking_service import SemanticChunkingService
 from ..services.embedding_service import EmbeddingService
 from ...shared.services.s3_vector_store import S3VectorStore, VectorRecord
 from ...shared.services.corpus_change_table import CorpusChangeTable
+from ..services.bm25_update_event_publisher import BM25UpdateEventService
 from ..config import settings
 
 from typing import List
@@ -57,6 +58,7 @@ def ingestion_handler(event, context):
     embedding_service = EmbeddingService(embedding_model_id=settings.EMBEDDING_MODEL_ID)
     vector_store = S3VectorStore(bucket=settings.S3_VECTOR_BUCKET_NAME, vector_index=settings.S3_VECTOR_INDEX_NAME)
     corpus_change_table = CorpusChangeTable(table_name=settings.DYNAMODB_CORPUS_CHANGE_TABLE_NAME)
+    bm25_update_message_sender = BM25UpdateEventService(queue_url=settings.SQS_BM25_UPDATE_QUEUE_URL)
 
     for sqs_ingestion_record in event["Records"]:
         sqs_message_id = sqs_ingestion_record.get("messageId")
@@ -259,3 +261,28 @@ def ingestion_handler(event, context):
                 )
                 manifest_repository.mark_manifest_failed(doc_id=doc_id, ingest=True, error_message=str(e))
                 raise RuntimeError(f"Ingestion finalization failed for doc_id='{doc_id}'") from e
+            
+
+            # after finalize + corpus_change_response acquired
+            bm25_update_sqs_payload = {
+                "op": "upsert", 
+                "doc_id": doc_id,
+                "corpus_version": corpus_change_response["change_id"],
+            }
+
+            try:
+                bm25_update_message_sender.publish_bm25_update_event_to_queue(bm25_update_sqs_payload)
+                logger.info(json.dumps({
+                    "event": "bm25_update_event_publish_success",
+                    "doc_id": doc_id,
+                    "corpus_version": bm25_update_sqs_payload["corpus_version"],
+                    "sqs_message_id": sqs_message_id,
+                    "aws_request_id": req_id
+                }))
+            except Exception:
+                logger.exception(
+                    f"BM25 update event publish failed (doc_id={doc_id} corpus_version={bm25_update_sqs_payload['corpus_version']} sqs_message_id={sqs_message_id} aws_request_id={req_id})"
+                )
+
+
+                

@@ -1,11 +1,12 @@
 from typing import Any, Callable, Dict, List, Optional
-from .services.corpus_monitor import CorpusMonitor
-
-from .services.chunk_loader import load_documents_for_doc_id, load_indexed_documents
-from .services.corpus_delta_applier import apply_changes
-from .services.chunk_index import InMemoryChunkIndex
+from ..shared.services.corpus_monitor import CorpusMonitor
+from ..shared.services.chunk_loader import load_documents_for_doc_id
+from ..shared.services.corpus_delta_applier import apply_changes
+from ..shared.services.chunk_index import InMemoryChunkIndex
 from ..indexing.services.manifest_repository import ManifestRepository
+from ..indexing.services.indexed_documents_loader import load_indexed_documents
 from ..shared.services.s3_gp_chunk_store import S3GPChunkStore
+from .services.keyword_retriever import KeywordSearchService
 
 
 class RetrievalOrchestrator:
@@ -34,6 +35,10 @@ class RetrievalOrchestrator:
             doc_chunk_index=doc_chunk_index,
         )
 
+        self.bm25_retriever = KeywordSearchService(
+            chunks_list=list(self.chunk_index.documents_by_chunk_id.values())
+        )
+
         self.chat_history = chat_history
 
 
@@ -58,7 +63,12 @@ class RetrievalOrchestrator:
                 chunk_index=self.chunk_index,
                 chunk_loader=chunk_loader
             )
-            
+        
+            self.bm25_retriever = KeywordSearchService(
+                chunks_list=list(self.chunk_index.documents_by_chunk_id.values())
+            )
+
+    
 
     def run_retrieval(self, raw_user_query: str) -> str:
         pass

@@ -55,6 +55,12 @@ Parameters:
   DeletionDlqName:
     Type: String
     Default: delete-dlq-sam
+  BM25UpdateQueueName:
+    Type: String
+    Default: bm25-update-queue-sam
+  BM25UpdateDlqName:
+    Type: String
+    Default: bm25-update-dlq-sam
   QueueVisibilityTimeoutSeconds:
     Type: Number
     Default: 360
@@ -71,6 +77,9 @@ Parameters:
   DeletionFunctionName:
     Type: String
     Default: delete-lambda-worker
+  BM25UpdateFunctionName:
+    Type: String
+    Default: bm25-update-lambda-worker
   LambdaMemorySize:
     Type: Number
     Default: 1024
@@ -97,6 +106,7 @@ Globals:
         CHUNKING_MODEL_ID: !Ref ChunkingModelId
         EMBEDDING_MODEL_ID: !Ref EmbeddingModelId
         S3_VECTOR_INDEX_NAME: !Sub '${ProjectName}-${EnvironmentName}-${S3VectorIndexName}'
+        SQS_BM25_UPDATE_QUEUE_URL: !Ref BM25UpdateQueue
     Tags:
       project: !Ref ProjectName
       env: !Ref EnvironmentName
@@ -219,6 +229,22 @@ Resources:
               ArnEquals:
                 aws:SourceArn: !Sub 'arn:aws:s3:::${ProjectName}-${EnvironmentName}-${S3GeneralPurposeBucketName}'
 
+  BM25UpdateDlq:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub '${ProjectName}-${EnvironmentName}-${BM25UpdateDlqName}'
+      MessageRetentionPeriod: 1209600
+
+  BM25UpdateQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub '${ProjectName}-${EnvironmentName}-${BM25UpdateQueueName}'
+      VisibilityTimeout: !Ref QueueVisibilityTimeoutSeconds
+      MessageRetentionPeriod: 345600
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt BM25UpdateDlq.Arn
+        maxReceiveCount: 5      
+
 # -----------------------------------------------------------------------------------------------
 # DynamoDB Resource (Doc-Vector Manifest for tracking ingested docs and their chunk vectors)
 # -----------------------------------------------------------------------------------------------
@@ -285,6 +311,11 @@ Resources:
                 - sqs:GetQueueAttributes
                 - sqs:ChangeMessageVisibility
               Resource: !GetAtt IngestionQueue.Arn
+            - Sid: SendSQSBM25UpdateMessage
+              Effect: Allow
+              Action:
+                - sqs:SendMessage
+              Resource: !GetAtt BM25UpdateQueue.Arn
             - Sid: ReadWriteDocBucket
               Effect: Allow
               Action:
@@ -363,6 +394,11 @@ Resources:
                 - sqs:GetQueueAttributes
                 - sqs:ChangeMessageVisibility
               Resource: !GetAtt DeletionQueue.Arn
+            - Sid: SendSQSBM25UpdateMessage
+              Effect: Allow
+              Action:
+                - sqs:SendMessage
+              Resource: !GetAtt BM25UpdateQueue.Arn
             - Sid: ReadWriteDocBucket
               Effect: Allow
               Action:
@@ -400,13 +436,71 @@ Resources:
                 - dynamodb:Query
                 - dynamodb:PutItem
               Resource: !GetAtt CorpusChangeTable.Arn
-            # TODO: add s3vectors delete permissions once final index resource ARN is known.
       Events:
         DeletionQueueEvent:
           Type: SQS
           Properties:
             Queue: !GetAtt DeletionQueue.Arn
             BatchSize: 1
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
+  
+  BM25UpdateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${ProjectName}-${EnvironmentName}-${BM25UpdateFunctionName}'
+      CodeUri: ../backend/
+      Handler: src.indexing.workers.bm25_update_lambda_worker.bm25_update_handler
+      Description: Rebuilds BM25 snapshot artifacts from indexed chunks and publishes latest snapshot metadata.
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Statement:
+            - Sid: SQSConsumeBM25Update
+              Effect: Allow
+              Action:
+                - sqs:ReceiveMessage
+                - sqs:DeleteMessage
+                - sqs:GetQueueAttributes
+                - sqs:ChangeMessageVisibility
+                - sqs:GetQueueUrl
+              Resource: !GetAtt BM25UpdateQueue.Arn
+            - Sid: ReadWriteBM25SnapshotObjects
+              Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:PutObject
+              Resource:
+                - !Sub 'arn:aws:s3:::${ProjectName}-${EnvironmentName}-${S3GeneralPurposeBucketName}/${ChunksPrefix}/*'
+                - !Sub 'arn:aws:s3:::${ProjectName}-${EnvironmentName}-${S3GeneralPurposeBucketName}/bm25/*'
+            - Sid: ListBM25AndChunkPrefixes
+              Effect: Allow
+              Action:
+                - s3:ListBucket
+              Resource:
+                - !GetAtt S3GeneralPurposeBucket.Arn
+            - Sid: ReadManifestIndexedDocs
+              Effect: Allow
+              Action:
+                - dynamodb:Query
+                - dynamodb:GetItem
+              Resource:
+                - !GetAtt ManifestTable.Arn
+                - !Sub '${ManifestTable.Arn}/index/status-index'
+            - Sid: ReadWriteCorpusChangeForVersioning
+              Effect: Allow
+              Action:
+                - dynamodb:Query
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+              Resource: !GetAtt CorpusChangeTable.Arn
+      Events:
+        BM25UpdateQueueEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt BM25UpdateQueue.Arn
+            BatchSize: 10
+            MaximumBatchingWindowInSeconds: 20
             FunctionResponseTypes:
               - ReportBatchItemFailures
 

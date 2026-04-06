@@ -1,6 +1,6 @@
-from typing import Any, Dict, List
+from typing import Dict, List
 
-from ...shared.services.corpus_change_table import CorpusChangeTable
+from .corpus_change_table import CorpusChangeTable
 
 
 class CorpusMonitor:
@@ -12,8 +12,8 @@ class CorpusMonitor:
     def validate_latest_change(self):
         """Simple helper to validate corpus is in its latest version """
         return self.latest_change_id == self.corpus_change_table.get_latest_change_id()
-    
-    
+
+
     def get_latest_changes(self, prev_latest_change_id: int) -> Dict[str, str]:
         """
         Query corpus change table rows where change_id is newer than the provided
@@ -53,8 +53,8 @@ class CorpusMonitor:
                     latest_cid = entry.get("change_id", {}).get("N")
                     if latest_cid:
                         latest_cid = int(latest_cid)
-            
-                    doc_id = entry.get("doc_id", {}).get("S")  
+
+                    doc_id = entry.get("doc_id", {}).get("S")
                     op = entry.get("op", {}).get("S")
                     if doc_id and op in {"upsert", "delete"}:
                         # Oldest->newest query order means "latest op wins" for net effect.
@@ -68,8 +68,3 @@ class CorpusMonitor:
             self.latest_change_id = latest_cid
 
         return out
-
-
-        
-
-

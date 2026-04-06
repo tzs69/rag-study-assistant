@@ -9,6 +9,7 @@ from ..services.manifest_repository import ManifestRepository
 from ...shared.services.s3_gp_chunk_store import S3GPChunkStore
 from ...shared.services.s3_vector_store import S3VectorStore
 from ...shared.services.corpus_change_table import CorpusChangeTable
+from ..services.bm25_update_event_publisher import BM25UpdateEventService
 
 from ..config import settings
 
@@ -50,6 +51,8 @@ def deletion_handler(event, context):
     chunk_store = S3GPChunkStore(bucket=settings.S3_GP_BUCKET_NAME, chunks_prefix=settings.S3_GP_CHUNK_PREFIX)
     vector_store = S3VectorStore(bucket=settings.S3_VECTOR_BUCKET_NAME, vector_index=settings.S3_VECTOR_INDEX_NAME)
     corpus_change_table = CorpusChangeTable(table_name=settings.DYNAMODB_CORPUS_CHANGE_TABLE_NAME)
+    bm25_update_message_sender = BM25UpdateEventService(queue_url=settings.SQS_BM25_UPDATE_QUEUE_URL)
+
 
     for sqs_deletion_record in sqs_delete_events_list:
         sqs_message_id = sqs_deletion_record.get("messageId")
@@ -214,3 +217,25 @@ def deletion_handler(event, context):
                 )
                 manifest_repository.mark_manifest_failed(doc_id=doc_id, ingest=False, error_message=str(e))
                 raise RuntimeError(f"Deletion finalization failed for doc_id='{doc_id}'") from e
+
+            
+            # after finalize + corpus_change_response acquired
+            bm25_update_sqs_payload = {
+                "op": "delete", 
+                "doc_id": doc_id,
+                "corpus_version": corpus_change_response["change_id"],
+            }
+
+            try:
+                bm25_update_message_sender.publish_bm25_update_event_to_queue(bm25_update_sqs_payload)
+                logger.info(json.dumps({
+                    "event": "bm25_update_event_publish_success",
+                    "doc_id": doc_id,
+                    "corpus_version": bm25_update_sqs_payload["corpus_version"],
+                    "sqs_message_id": sqs_message_id,
+                    "aws_request_id": req_id
+                }))
+            except Exception:
+                logger.exception(
+                    f"BM25 update event publish failed (doc_id={doc_id} corpus_version={bm25_update_sqs_payload['corpus_version']} sqs_message_id={sqs_message_id} aws_request_id={req_id})"
+                )

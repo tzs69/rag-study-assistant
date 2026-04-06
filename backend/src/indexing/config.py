@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL_ID: Optional[str] = None
     S3_VECTOR_INDEX_NAME: Optional[str] = None
 
+    SQS_BM25_UPDATE_QUEUE_URL: Optional[str] = None
+
     model_config = ConfigDict(
         env_file_encoding="utf-8",
         extra="ignore",

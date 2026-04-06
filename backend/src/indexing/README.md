@@ -11,6 +11,8 @@ This document describes the current indexing architecture implemented in this re
   - AWS session and basic clients are implemented.
   - Ingestion and deletion workers are wired to SQS-wrapped S3 events.
   - Corpus change tracking is implemented via DynamoDB change records on ingest/delete finalize.
+  - BM25 update events are published from ingest/delete workers to a dedicated SQS queue.
+  - BM25 update worker is implemented and maintains latest BM25 snapshot + pointer in S3.
 
 ## Current Implementation (As-Is)
 
@@ -66,6 +68,10 @@ This document describes the current indexing architecture implemented in this re
 3. Request returns success after upload.
 4. Ingestion worker performs chunking, embedding, vector upsert, and manifest finalize.
 5. Ingestion/deletion finalization appends a corpus change record (`upsert`/`delete`) used by retrieval freshness checks.
+6. Ingestion/deletion workers publish BM25 update events (`doc_id`, `op`, `corpus_version`) to BM25 update queue.
+7. BM25 update worker consumes queue events, applies corpus deltas, and writes:
+   - `bm25/snapshot.json` (latest snapshot; source-of-truth artifact that retrieval reads to serve non-stale keyword search results)
+   - `bm25/latest.json` (latest pointer metadata)
 
 ## Current Pipeline (Event-Driven)
 
@@ -126,8 +132,27 @@ This document describes the current indexing architecture implemented in this re
       +--> Claim deletion + fetch vector keys from manifest (DynamoDB)
       +--> Delete chunk artifact in /chunks
       +--> DeleteVectors(keys=[...]) in vector store
-      +--> Clear vector keys and finalize status to deleted
-      +--> Ack message on success
+	      +--> Clear vector keys and finalize status to deleted
+	      +--> Ack message on success
+
+
+                    BM25 UPDATE PIPELINE
+
+[Ingestion Worker]--------+
+                          |
+[Deletion Worker]---------+--> [BM25 Update SQS Queue] -----> [DLQ]
+                                        |
+                                        v
+                                 [BM25 Update Worker]
+                                        |
+                                        +--> Parse/validate queue payloads
+                                        +--> Compare target_version vs bm25/latest.json
+                                        +--> Warm-start from bm25/snapshot.json (if exists)
+                                        +--> Fallback bootstrap from manifest indexed docs
+                                        +--> Apply corpus deltas from corpus-change table
+                                        +--> Validate BM25 build
+                                        +--> Write bm25/snapshot.json
+                                        +--> Write bm25/latest.json
 ```
 
 ## Implemented Pipeline Stages
@@ -207,11 +232,11 @@ Current design:
 
 ## Next Milestones
 
-1. Add retrieval-side corpus monitor + orchestrator wiring to consume corpus change versions safely.
-2. Implement BM25 artifact build/publish pipeline using chunk JSONL from shared store.
-3. Add end-to-end tests for corpus change version bumps on ingest/delete success paths.
-4. Add failure-mode tests to verify corpus change rows are not appended on failed finalize.
-5. Add observability dashboards for manifest state transitions and corpus change lag.
+1. Add end-to-end tests for BM25 event publish on ingest/delete success paths.
+2. Add failure-mode tests for BM25 worker retry behavior and partial-batch failures.
+3. Add observability dashboards for BM25 queue lag, snapshot publish latency, and pointer version drift.
+4. Add optional periodic reconciliation job to rebuild snapshot from manifest for drift recovery.
+5. Add structured alerting on BM25 snapshot publish failures and DLQ growth.
 
 ## Source-of-Truth Snapshot
 
@@ -231,12 +256,22 @@ As of this document, these files represent current implemented indexing-related 
 - `backend/src/indexing/services/chunking_service.py`
 - `backend/src/indexing/services/embedding_service.py`
 - `backend/src/indexing/services/manifest_repository.py`
+- `backend/src/indexing/clients/sqs_client.py`
+- `backend/src/indexing/services/bm25_update_event_publisher.py`
+- `backend/src/indexing/services/indexed_documents_loader.py`
+- `backend/src/indexing/services/latest_chunk_index_loader.py`
 - `backend/src/indexing/workers/ingest_lambda_worker.py`
 - `backend/src/indexing/workers/delete_lambda_worker.py`
+- `backend/src/indexing/workers/bm25_update_lambda_worker.py`
+- `backend/src/shared/services/chunk_loader.py`
+- `backend/src/shared/services/chunk_index.py`
+- `backend/src/shared/services/corpus_delta_applier.py`
+- `backend/src/shared/services/corpus_monitor.py`
 
 This README should be updated when:
 
 - retrieval-side corpus monitor/index refresh contracts are finalized under `backend/src/retrieval`,
+- BM25 snapshot contract (schema keys, pointer semantics, key names) changes,
 - deletion finalization strategy changes (soft-delete vs hard-delete manifest),
 - indexing contracts (chunk key/vector key schema) change.
 

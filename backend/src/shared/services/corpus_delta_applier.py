@@ -26,7 +26,7 @@ def apply_changes(
     }
     """
     for doc_id, op in latest_changes.items():
-        
+
         # Apply deletes
         if op == "delete":
             chunk_index.remove_doc(doc_id)
