@@ -19,6 +19,11 @@ class Settings(BaseSettings):
     # Retrieval model settings (optional until wired)
     RETRIEVAL_LLM_MODEL_ID: Optional[str] = None
 
+    # BM25 snapshot polling settings
+    BM25_POINTER_KEY: str = "bm25/pointer.json"
+    BM25_SNAPSHOT_KEY: str = "bm25/snapshot.json"
+    BM25_POLL_INTERVAL_SECONDS: int = 5
+
     model_config = ConfigDict(
         env_file_encoding="utf-8",
         extra="ignore",

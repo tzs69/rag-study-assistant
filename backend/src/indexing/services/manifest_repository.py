@@ -336,3 +336,25 @@ class ManifestRepository:
         ]
 
         return indexed_docids
+
+
+    def fetch_status_by_doc_ids(self, doc_ids: List[str]) -> Dict[str, str]:
+        """
+        Return {doc_id: status} for the provided doc_ids.
+        Missing rows are omitted from the output map.
+        """
+        out: Dict[str, str] = {}
+        for doc_id in doc_ids:
+            if not doc_id or not str(doc_id).strip():
+                continue
+            response = self.dynamodb.client.get_item(
+                TableName=self.table_name,
+                Key={"doc_id": {"S": doc_id}},
+                ProjectionExpression="#s",
+                ExpressionAttributeNames={"#s": "status"},
+            )
+            status_attr = response.get("Item", {}).get("status", {})
+            status = status_attr.get("S")
+            if status:
+                out[doc_id] = status
+        return out

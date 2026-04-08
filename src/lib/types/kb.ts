@@ -1,5 +1,6 @@
 export type DocumentData = {
 	docId: string;
 	fileName: string;
-	uploadedAt: string
+	uploadedAt: string;
+	status: string;
 }

@@ -17,6 +17,8 @@ from ...shared.services.corpus_delta_applier import apply_changes
 from ...shared.services.corpus_monitor import CorpusMonitor
 from ...shared.services.s3_base_store import BaseStore
 from ...shared.services.s3_gp_chunk_store import S3GPChunkStore
+from ...shared.services.latest_bm25_pointer_loader import load_latest_pointer
+
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -126,7 +128,7 @@ def bm25_update_handler(event, context):
         corpus_monitor = CorpusMonitor(table_name=settings.DYNAMODB_CORPUS_CHANGE_TABLE_NAME)
 
         # Get latest pointer version pointer to compare against target_version for this update batch before commencing updates. 
-        latest_pointer = _load_latest_pointer(base_store=base_store)
+        latest_pointer = load_latest_pointer(base_store=base_store, pointer_key=POINTER_KEY)
         latest_pointer_version = int(latest_pointer.get("corpus_version", 0))
 
         # If latest pointer version is already ahead of target_version, skip update processing to avoid redundant work.
@@ -249,31 +251,6 @@ def bm25_update_handler(event, context):
             f"BM25 snapshot rebuild failed (aws_request_id={req_id} valid_record_count={len(valid_message_ids)})"
         )
         return {"batchItemFailures": _to_batch_failures(valid_message_ids)}
-
-
-def _load_latest_pointer(
-    *,
-    base_store: BaseStore
-) -> Dict[str, Any]:
-    """Load the BM25 pointer JSON; fallback and return empty dict if missing."""
-    try:
-        response = base_store.s3.client.get_object(
-            Bucket=base_store.bucket, 
-            Key=POINTER_KEY
-        )
-        raw_bytes_payload = response["Body"].read()
-        latest_pointer = json.loads(raw_bytes_payload.decode("utf-8"))
-
-        if not isinstance(latest_pointer, dict):
-            return {}
-        
-        return latest_pointer
-    
-    except ClientError as e:
-        code = e.response.get("Error", {}).get("Code")
-        if code in ("NoSuchKey", "404"):
-            return {}
-        raise
 
 
 def _normalize_event_payload(payload: Dict[str, Any]) -> Dict[str, Any] | None:

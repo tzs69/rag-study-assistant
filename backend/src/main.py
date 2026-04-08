@@ -1,12 +1,15 @@
 # backend/src/main.py
 import logging
 import re
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
 
 from pydantic import BaseModel
 from fastapi import FastAPI, UploadFile, File
 from fastapi import HTTPException
 from typing import List, Literal, Optional
 from .indexing.config import settings as indexing_settings
+from .indexing.services.manifest_repository import ManifestRepository
 from .indexing.services.s3_gp_raw_document_store import S3GPRawDocumentStore
 from .retrieval.config import settings as retrieval_settings
 from .retrieval.retrieval_orchestrator import RetrievalOrchestrator
@@ -18,12 +21,31 @@ raw_doc_store = S3GPRawDocumentStore(
     bucket=indexing_settings.S3_GP_BUCKET_NAME,
     raw_prefix=indexing_settings.S3_GP_RAW_PREFIX,
 )
+manifest_repository = (
+    ManifestRepository(table_name=indexing_settings.DYNAMODB_MANIFEST_TABLE_NAME)
+    if indexing_settings.DYNAMODB_MANIFEST_TABLE_NAME
+    else None
+)
 retrieval_orchestrator = RetrievalOrchestrator(
     manifest_table_name=retrieval_settings.DYNAMODB_MANIFEST_TABLE_NAME,
     corpus_change_table_name=retrieval_settings.DYNAMODB_CORPUS_CHANGE_TABLE_NAME,
     s3_gp_bucket_name=retrieval_settings.S3_GP_BUCKET_NAME,
-    chunks_prefix=retrieval_settings.S3_GP_CHUNK_PREFIX
+    chunks_prefix=retrieval_settings.S3_GP_CHUNK_PREFIX,
+    bm25_pointer_key=retrieval_settings.BM25_POINTER_KEY,
+    bm25_snapshot_key=retrieval_settings.BM25_SNAPSHOT_KEY,
+    bm25_poll_interval_seconds=retrieval_settings.BM25_POLL_INTERVAL_SECONDS,
 )
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    retrieval_orchestrator.start_background_polling()
+    try:
+        yield
+    finally:
+        retrieval_orchestrator.stop_background_polling()
+
+app = FastAPI(lifespan=lifespan)
 
 # ==================================================================================
 #             INDEXING ENTRY POINTS
@@ -50,9 +72,18 @@ async def upload(files: list[UploadFile] = File(...)):
 
 @app.get("/documents")
 def list():
-    """Return the current raw document list for Knowledge Base display."""
+    """Return raw document list for Knowledge Base display, including per-document indexing status."""
     try:
         docs_data_list = raw_doc_store.list_raw_docs()
+        if manifest_repository and docs_data_list:
+            doc_ids = [doc["docId"] for doc in docs_data_list if "docId" in doc]
+            status_by_doc_id = manifest_repository.fetch_status_by_doc_ids(doc_ids)
+            for doc in docs_data_list:
+                doc_id = doc.get("docId")
+                doc["status"] = status_by_doc_id.get(doc_id, "uploaded")
+        else:
+            for doc in docs_data_list:
+                doc["status"] = "uploaded"
         return {
             "ok": True,
             "documents": docs_data_list
@@ -124,8 +155,6 @@ def chat(req: ChatRequest):
 
         # placeholder for now
         # answer = f"{user_query} testing_123"
-        retrieval_orchestrator.refresh_documents_if_stale()
-
         top_k_document: List[Document] = retrieval_orchestrator.bm25_retriever.search(user_query, top_k=5)
         if not top_k_document:
             return ChatResponse(answer="I couldn't find relevant content for that query in the indexed documents.")
