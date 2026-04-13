@@ -45,6 +45,13 @@ Planned next:
 4. S3 events trigger ingestion/deletion workers (via SQS) for downstream indexing lifecycle.
 5. Frontend fetches document list via `/api/documents`.
 
+## Indexing Demo
+
+<video src="assets/indexing_demo.mp4" controls width="900">
+  Your browser does not support the video tag.
+</video>
+
+
 ## Local Development
 
 ### Requirements
