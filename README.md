@@ -47,9 +47,7 @@ Planned next:
 
 ## Indexing Demo
 
-<video src="assets/indexing_demo.mp4" controls width="900">
-  Your browser does not support the video tag.
-</video>
+https://github.com/user-attachments/assets/ad8b1e81-bc23-4858-84c2-17be012acbbf
 
 
 ## Local Development
