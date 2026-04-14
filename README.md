@@ -55,7 +55,6 @@ Planned next:
 - LangChain ecosystem (`langchain-aws`, `langchain-experimental`, `langchain_community`)
 - `rank_bm25` (keyword retrieval)
 - `pypdf`, `python-docx` (document text extraction)
-- SQLite (domain lexicon store for spell-correction support)
 
 ### Infrastructure / Cloud
 - AWS SAM (CloudFormation)

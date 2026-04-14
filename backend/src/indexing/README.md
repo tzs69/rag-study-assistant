@@ -10,7 +10,7 @@ This document describes the current indexing architecture implemented in this re
   - Upload API to S3 is implemented.
   - AWS session and basic clients are implemented.
   - Ingestion and deletion workers are wired to SQS-wrapped S3 events.
-  - Domain lexicon tracking is implemented (document term-frequency extraction + SQLite upsert/delete).
+  - Domain lexicon tracking is implemented (document term-frequency extraction + DynamoDB upsert/delete).
   - Corpus change tracking is implemented via DynamoDB change records on ingest/delete finalize.
   - BM25 update events are published from ingest/delete workers to a dedicated SQS queue.
   - BM25 update worker is implemented and maintains latest BM25 snapshot + pointer in S3.
@@ -68,8 +68,8 @@ This document describes the current indexing architecture implemented in this re
   - `backend/src/shared/services/domain_lexicon_store.py`
 - Behavior:
   - Ingestion worker extracts per-document term frequencies from normalized document text.
-  - Ingestion worker upserts `(doc_id, term, doc_tf)` and collection-level term stats into SQLite.
-  - Deletion worker removes a document's term contributions from SQLite.
+  - Ingestion worker upserts `(doc_id, term, doc_tf)` and collection-level term stats into DynamoDB.
+  - Deletion worker removes a document's term contributions from DynamoDB.
   - Lexicon update path is best-effort and does not fail core indexing lifecycle transitions.
 
 ### Current runtime flow
@@ -78,7 +78,7 @@ This document describes the current indexing architecture implemented in this re
 2. API reads each file and stores directly into S3 bucket.
 3. Request returns success after upload.
 4. Ingestion worker reads/normalizes document text, builds doc-level term frequencies, then performs chunking, embedding, vector upsert.
-5. Ingestion/deletion workers update domain lexicon SQLite (best-effort) using `upsert`/`delete` semantics by `doc_id`.
+5. Ingestion/deletion workers update domain lexicon DynamoDB tables (best-effort) using `upsert`/`delete` semantics by `doc_id`.
 6. Ingestion/deletion finalization appends a corpus change record (`upsert`/`delete`) used by retrieval freshness checks.
 7. Ingestion/deletion workers publish BM25 update events (`doc_id`, `op`, `corpus_version`) to BM25 update queue.
 8. BM25 update worker consumes queue events, applies corpus deltas, and writes:
@@ -123,7 +123,7 @@ This document describes the current indexing architecture implemented in this re
       6 --> Upload chunks as json into S3
         --> Generate embeddings on Chunks (Bedrock)
       7 --> Upsert vectors into S3 vector store
-      8 --> Best-effort upsert into domain lexicon store (SQLite)
+      8 --> Best-effort upsert into domain lexicon store (DynamoDB)
       9 --> Finalize ingestion event: persist indexing status/metadata
         --> On success, SQS ack is handled by the Lambda event source mapping
 
@@ -146,7 +146,7 @@ This document describes the current indexing architecture implemented in this re
       +--> Claim deletion + fetch vector keys from manifest (DynamoDB)
       +--> Delete chunk artifact in /chunks
       +--> DeleteVectors(keys=[...]) in vector store
-      +--> Best-effort delete doc term mappings from domain lexicon store (SQLite)
+      +--> Best-effort delete doc term mappings from domain lexicon store (DynamoDB)
 	      +--> Clear vector keys and finalize status to deleted
 	      +--> Ack message on success
 
@@ -218,7 +218,7 @@ Worker is implemented as a pure orchestrator with these substeps:
 - Ensure repeated upserts for same chunk id are safe.
 
 8. Domain lexicon upsert (best-effort)
-- Upsert document term frequencies into SQLite-backed domain lexicon store.
+- Upsert document term frequencies into DynamoDB-backed domain lexicon store.
 - Failures are logged but do not fail core indexing transitions.
 
 9. State tracking
@@ -246,7 +246,7 @@ Current design:
 - Resolve `docId` from the S3 event/object key mapping.
 - Look up manifest for that `docId`.
 - Call vector store delete API with all keys from manifest.
-- Best-effort delete document term mappings from SQLite domain lexicon store.
+- Best-effort delete document term mappings from DynamoDB domain lexicon store.
 - Finalize manifest by clearing `vector_keys` and setting status to `deleted`.
 
 4. Make delete flow idempotent

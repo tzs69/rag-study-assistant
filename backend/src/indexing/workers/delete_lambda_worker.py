@@ -53,8 +53,10 @@ def deletion_handler(event, context):
     vector_store = S3VectorStore(bucket=settings.S3_VECTOR_BUCKET_NAME, vector_index=settings.S3_VECTOR_INDEX_NAME)
     corpus_change_table = CorpusChangeTable(table_name=settings.DYNAMODB_CORPUS_CHANGE_TABLE_NAME)
     bm25_update_message_sender = BM25UpdateEventService(queue_url=settings.SQS_BM25_UPDATE_QUEUE_URL)
-    domain_lexicon_store = DomainLexiconStore(db_path=settings.DOMAIN_LEXICON_DB_PATH, domain_lexicon_schema_path=settings.DOMAIN_LEXICON_SCHEMA_PATH)
-    domain_lexicon_store.init_db()
+    domain_lexicon_store = DomainLexiconStore(
+        collection_term_stats_table_name=settings.DYNAMODB_COLLECTION_TERM_STATS_TABLE_NAME,
+        doc_term_stats_table_name=settings.DYNAMODB_DOC_TERM_STATS_TABLE_NAME,
+    )
 
 
     for sqs_deletion_record in sqs_delete_events_list:
