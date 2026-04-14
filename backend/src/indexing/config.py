@@ -21,6 +21,9 @@ class Settings(BaseSettings):
 
     SQS_BM25_UPDATE_QUEUE_URL: Optional[str] = None
 
+    DOMAIN_LEXICON_DB_PATH: Optional[str] = None
+    DOMAIN_LEXICON_SCHEMA_PATH: Optional[str] = None
+
     model_config = ConfigDict(
         env_file_encoding="utf-8",
         extra="ignore",

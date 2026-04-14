@@ -50,3 +50,8 @@ next-env.d.ts
 .aws-sam/
 infra/.aws-sam/
 infra/samconfig.toml
+
+# built db artifacts
+backend/data/**/*.db
+backend/data/**/*.db-wal
+backend/data/**/*.db-shm

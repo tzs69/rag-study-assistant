@@ -10,6 +10,7 @@ This document describes the current indexing architecture implemented in this re
   - Upload API to S3 is implemented.
   - AWS session and basic clients are implemented.
   - Ingestion and deletion workers are wired to SQS-wrapped S3 events.
+  - Domain lexicon tracking is implemented (document term-frequency extraction + SQLite upsert/delete).
   - Corpus change tracking is implemented via DynamoDB change records on ingest/delete finalize.
   - BM25 update events are published from ingest/delete workers to a dedicated SQS queue.
   - BM25 update worker is implemented and maintains latest BM25 snapshot + pointer in S3.
@@ -61,15 +62,26 @@ This document describes the current indexing architecture implemented in this re
 - Behavior:
   - Ingestion/deletion workers use manifest + shared storage services and append corpus change events.
 
+6. Domain lexicon services (for query-time spell correction support)
+- Files:
+  - `backend/src/indexing/services/document_terms_extractor.py`
+  - `backend/src/shared/services/domain_lexicon_store.py`
+- Behavior:
+  - Ingestion worker extracts per-document term frequencies from normalized document text.
+  - Ingestion worker upserts `(doc_id, term, doc_tf)` and collection-level term stats into SQLite.
+  - Deletion worker removes a document's term contributions from SQLite.
+  - Lexicon update path is best-effort and does not fail core indexing lifecycle transitions.
+
 ### Current runtime flow
 
 1. Client sends multipart files to `POST /upload`.
 2. API reads each file and stores directly into S3 bucket.
 3. Request returns success after upload.
-4. Ingestion worker performs chunking, embedding, vector upsert, and manifest finalize.
-5. Ingestion/deletion finalization appends a corpus change record (`upsert`/`delete`) used by retrieval freshness checks.
-6. Ingestion/deletion workers publish BM25 update events (`doc_id`, `op`, `corpus_version`) to BM25 update queue.
-7. BM25 update worker consumes queue events, applies corpus deltas, and writes:
+4. Ingestion worker reads/normalizes document text, builds doc-level term frequencies, then performs chunking, embedding, vector upsert.
+5. Ingestion/deletion workers update domain lexicon SQLite (best-effort) using `upsert`/`delete` semantics by `doc_id`.
+6. Ingestion/deletion finalization appends a corpus change record (`upsert`/`delete`) used by retrieval freshness checks.
+7. Ingestion/deletion workers publish BM25 update events (`doc_id`, `op`, `corpus_version`) to BM25 update queue.
+8. BM25 update worker consumes queue events, applies corpus deltas, and writes:
    - `bm25/snapshot.json` (latest snapshot; source-of-truth artifact that retrieval reads to serve non-stale keyword search results)
    - `bm25/latest.json` (latest pointer metadata)
 
@@ -106,15 +118,17 @@ This document describes the current indexing architecture implemented in this re
       1 --> Parse event payload and perform basic envelope validation
       2 --> Claim ingestion event 
       3 --> Read document from S3
-      4 --> Chunk document
-      5 --> Upload chunks as json into S3
+      4 --> Build per-document term tf dictionary from normalized text
+      5 --> Chunk document
+      6 --> Upload chunks as json into S3
         --> Generate embeddings on Chunks (Bedrock)
-      6 --> Upsert vectors into S3 vector store
-      7 --> Finalize ingestion event: persist indexing status/metadata
+      7 --> Upsert vectors into S3 vector store
+      8 --> Best-effort upsert into domain lexicon store (SQLite)
+      9 --> Finalize ingestion event: persist indexing status/metadata
         --> On success, SQS ack is handled by the Lambda event source mapping
 
 (Query path, downstream)
-[Retriever] -> [Vector Store] -> [LLM answer synthesis]
+[Retriever] -> [Spell correction (domain lexicon + base lexicon)] -> [Vector Store / BM25] -> [Re-ranker] -> [LLM answer synthesis]
 
 
                     DELETION PIPELINE 
@@ -132,6 +146,7 @@ This document describes the current indexing architecture implemented in this re
       +--> Claim deletion + fetch vector keys from manifest (DynamoDB)
       +--> Delete chunk artifact in /chunks
       +--> DeleteVectors(keys=[...]) in vector store
+      +--> Best-effort delete doc term mappings from domain lexicon store (SQLite)
 	      +--> Clear vector keys and finalize status to deleted
 	      +--> Ack message on success
 
@@ -186,19 +201,27 @@ Worker is implemented as a pure orchestrator with these substeps:
 - Convert supported formats to text.
 - Attach source metadata (doc_id/key, filename, mime type, timestamps).
 
-4. Chunking
+4. Extract document term frequencies (spell-lexicon support)
+- Normalize/tokenize extracted text and build `term -> doc_tf` mapping.
+- Keeps the mapping in memory for later domain-lexicon db upsert.
+
+5. Chunking
 - Apply token-aware chunking strategy with overlap.
 - Emit chunk-level metadata (`doc_id`, `chunk_id`, position offsets/pages).
 
-5. Embedding
+6. Embedding
 - Batch chunk texts to embedding model.
 - Handle rate limits/retries with exponential backoff.
 
-6. Vector upsert
+7. Vector upsert
 - Upsert vectors and metadata in a deterministic way.
 - Ensure repeated upserts for same chunk id are safe.
 
-7. State tracking
+8. Domain lexicon upsert (best-effort)
+- Upsert document term frequencies into SQLite-backed domain lexicon store.
+- Failures are logged but do not fail core indexing transitions.
+
+9. State tracking
 - Record status transitions: `received -> processing -> indexed`.
 - On failure: `failed` plus error class and retry count.
 - Persist corpus-level change stream records (`change_id`, `doc_id`, `op`, `updated_at`) on successful finalize.
@@ -223,6 +246,7 @@ Current design:
 - Resolve `docId` from the S3 event/object key mapping.
 - Look up manifest for that `docId`.
 - Call vector store delete API with all keys from manifest.
+- Best-effort delete document term mappings from SQLite domain lexicon store.
 - Finalize manifest by clearing `vector_keys` and setting status to `deleted`.
 
 4. Make delete flow idempotent
@@ -255,6 +279,7 @@ As of this document, these files represent current implemented indexing-related 
 - `backend/src/indexing/services/s3_gp_raw_document_store.py`
 - `backend/src/indexing/services/chunking_service.py`
 - `backend/src/indexing/services/embedding_service.py`
+- `backend/src/indexing/services/document_terms_extractor.py`
 - `backend/src/indexing/services/manifest_repository.py`
 - `backend/src/indexing/clients/sqs_client.py`
 - `backend/src/indexing/services/bm25_update_event_publisher.py`
@@ -267,6 +292,7 @@ As of this document, these files represent current implemented indexing-related 
 - `backend/src/shared/services/chunk_index.py`
 - `backend/src/shared/services/corpus_delta_applier.py`
 - `backend/src/shared/services/corpus_monitor.py`
+- `backend/src/shared/services/domain_lexicon_store.py`
 
 This README should be updated when:
 
