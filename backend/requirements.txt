@@ -7,3 +7,4 @@ python-docx
 langchain-experimental
 langchain-aws
 rank_bm25
+nltk

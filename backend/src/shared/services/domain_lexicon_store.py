@@ -1,5 +1,5 @@
 from typing import Any, Dict, List, Set, Tuple
-
+from nltk.util import ngrams
 from botocore.exceptions import ClientError
 from ..clients.dynamodb_client import DyanmoDBClient
 
@@ -71,6 +71,7 @@ class DomainLexiconStore:
         for term, doc_tf in terms.items():
             if doc_tf <= 0:
                 continue
+            prefix1, prefix2, bigrams = self._build_term_features(term)
             self.dynamodb.client.put_item(
                 TableName=self.doc_term_stats_table_name,
                 Item={
@@ -85,10 +86,16 @@ class DomainLexiconStore:
                 TableName=self.collection_term_stats_table_name,
                 Key={"term": {"S": term}},
                 UpdateExpression=(
-                    "SET collection_tf = if_not_exists(collection_tf, :zero) + :doc_tf, "
+                    "SET prefix1 = if_not_exists(prefix1, :prefix1), "
+                    "prefix2 = if_not_exists(prefix2, :prefix2), "
+                    "bigrams = if_not_exists(bigrams, :bigrams), "
+                    "collection_tf = if_not_exists(collection_tf, :zero) + :doc_tf, "
                     "doc_freq = if_not_exists(doc_freq, :zero) + :one"
                 ),
                 ExpressionAttributeValues={
+                    ":prefix1": {"S": prefix1},
+                    ":prefix2": {"S": prefix2} if prefix2 is not None else {"NULL": True},
+                    ":bigrams": {"L": [{"S": bigram} for bigram in bigrams]},
                     ":zero": {"N": "0"},
                     ":doc_tf": {"N": str(int(doc_tf))},
                     ":one": {"N": "1"},
@@ -148,6 +155,15 @@ class DomainLexiconStore:
             "total_terms_processed": num_terms_in_doc,
         }        
         return summary
+
+
+    def _build_term_features(self, term: str) -> Tuple[str, str | None, List[str]]:
+        """Build deterministic per-term features used by retrieval spell-correction."""
+        prefix1 = term[0]
+        prefix2 = term[:2] if len(term) >= 2 else None
+        bigrams = sorted({"".join(bigram) for bigram in ngrams(term, n=2)})
+        return prefix1, prefix2, bigrams
+
 
     def _query_doc_term_rows(self, doc_id: str) -> List[Tuple[str, int]]:
         """
