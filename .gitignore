@@ -55,3 +55,6 @@ infra/samconfig.toml
 backend/data/**/*.db
 backend/data/**/*.db-wal
 backend/data/**/*.db-shm
+
+# Jupyter notebook sandbox testing file
+testing.ipynb
