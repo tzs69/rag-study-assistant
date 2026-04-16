@@ -11,6 +11,24 @@ class Settings(BaseSettings):
     AWS_SSO_PROFILE: Optional[str] = None
     AWS_SSO_REGION: Optional[str] = None
 
+    S3_GP_BUCKET_NAME: Optional[str] = None
+    S3_GP_RAW_PREFIX: Optional[str] = None
+    S3_GP_CHUNK_PREFIX: Optional[str] = None
+
+    DYNAMODB_CORPUS_CHANGE_TABLE_NAME: Optional[str] = None
+    DYNAMODB_COLLECTION_TERM_STATS_TABLE_NAME: Optional[str] = None
+    DYNAMODB_DOC_TERM_STATS_TABLE_NAME: Optional[str] = None
+
+    SQS_BM25_UPDATE_QUEUE_URL: Optional[str] = None
+
+    DOMAIN_LEXICON_DB_PATH: Optional[str] = None
+    DOMAIN_LEXICON_SCHEMA_PATH: Optional[str] = None
+    
+    EMBEDDING_MODEL_ID: Optional[str] = None
+
+    BM25_POINTER_KEY: Optional[str] = None
+    BM25_SNAPSHOT_KEY: Optional[str] = None
+
     model_config = ConfigDict(
         env_file_encoding="utf-8",
         extra="ignore",

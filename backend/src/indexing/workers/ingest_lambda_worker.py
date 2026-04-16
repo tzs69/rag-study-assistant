@@ -11,7 +11,8 @@ from ...shared.services.corpus_change_table import CorpusChangeTable
 from ..services.bm25_update_event_publisher import BM25UpdateEventService
 from ..services.document_terms_extractor import build_term_frequency_dict
 from ...shared.services.domain_lexicon_store import DomainLexiconStore
-from ..config import settings
+from ..config import settings as indexing_settings
+from ...shared.config import settings as shared_settings
 
 from typing import List
 
@@ -53,17 +54,17 @@ def ingestion_handler(event, context):
     )
 
     # Initialize helper classes
-    document_reader = DocumentReaderService(bucket_name=settings.S3_GP_BUCKET_NAME)
-    manifest_repository = ManifestRepository(table_name=settings.DYNAMODB_MANIFEST_TABLE_NAME)      
-    chunking_service = SemanticChunkingService(chunking_llm_model_id=settings.CHUNKING_MODEL_ID)
-    chunk_store = S3GPChunkStore(bucket=settings.S3_GP_BUCKET_NAME, chunks_prefix=settings.S3_GP_CHUNK_PREFIX)
-    embedding_service = EmbeddingService(embedding_model_id=settings.EMBEDDING_MODEL_ID)
-    vector_store = S3VectorStore(bucket=settings.S3_VECTOR_BUCKET_NAME, vector_index=settings.S3_VECTOR_INDEX_NAME)
-    corpus_change_table = CorpusChangeTable(table_name=settings.DYNAMODB_CORPUS_CHANGE_TABLE_NAME)
-    bm25_update_message_sender = BM25UpdateEventService(queue_url=settings.SQS_BM25_UPDATE_QUEUE_URL)
+    document_reader = DocumentReaderService(bucket_name=shared_settings.S3_GP_BUCKET_NAME)
+    manifest_repository = ManifestRepository(table_name=indexing_settings.DYNAMODB_MANIFEST_TABLE_NAME)      
+    chunking_service = SemanticChunkingService(chunking_llm_model_id=indexing_settings.CHUNKING_MODEL_ID)
+    chunk_store = S3GPChunkStore(bucket=shared_settings.S3_GP_BUCKET_NAME, chunks_prefix=shared_settings.S3_GP_CHUNK_PREFIX)
+    embedding_service = EmbeddingService(embedding_model_id=shared_settings.EMBEDDING_MODEL_ID)
+    vector_store = S3VectorStore(bucket=indexing_settings.S3_VECTOR_BUCKET_NAME, vector_index=indexing_settings.S3_VECTOR_INDEX_NAME)
+    corpus_change_table = CorpusChangeTable(table_name=shared_settings.DYNAMODB_CORPUS_CHANGE_TABLE_NAME)
+    bm25_update_message_sender = BM25UpdateEventService(queue_url=indexing_settings.SQS_BM25_UPDATE_QUEUE_URL)
     domain_lexicon_store = DomainLexiconStore(
-        collection_term_stats_table_name=settings.DYNAMODB_COLLECTION_TERM_STATS_TABLE_NAME,
-        doc_term_stats_table_name=settings.DYNAMODB_DOC_TERM_STATS_TABLE_NAME,
+        collection_term_stats_table_name=shared_settings.DYNAMODB_COLLECTION_TERM_STATS_TABLE_NAME,
+        doc_term_stats_table_name=shared_settings.DYNAMODB_DOC_TERM_STATS_TABLE_NAME,
     )
 
     for sqs_ingestion_record in event["Records"]:

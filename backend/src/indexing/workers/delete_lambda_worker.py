@@ -12,7 +12,8 @@ from ...shared.services.corpus_change_table import CorpusChangeTable
 from ...shared.services.domain_lexicon_store import DomainLexiconStore
 from ..services.bm25_update_event_publisher import BM25UpdateEventService
 
-from ..config import settings
+from ..config import settings as indexing_settings
+from ...shared.config import settings as shared_settings
 
 def deletion_handler(event, context):
     """
@@ -47,15 +48,15 @@ def deletion_handler(event, context):
     )
 
     # Initialize helper classes
-    raw_doc_store = S3GPRawDocumentStore(bucket=settings.S3_GP_BUCKET_NAME, raw_prefix=settings.S3_GP_RAW_PREFIX)
-    manifest_repository = ManifestRepository(table_name=settings.DYNAMODB_MANIFEST_TABLE_NAME)      
-    chunk_store = S3GPChunkStore(bucket=settings.S3_GP_BUCKET_NAME, chunks_prefix=settings.S3_GP_CHUNK_PREFIX)
-    vector_store = S3VectorStore(bucket=settings.S3_VECTOR_BUCKET_NAME, vector_index=settings.S3_VECTOR_INDEX_NAME)
-    corpus_change_table = CorpusChangeTable(table_name=settings.DYNAMODB_CORPUS_CHANGE_TABLE_NAME)
-    bm25_update_message_sender = BM25UpdateEventService(queue_url=settings.SQS_BM25_UPDATE_QUEUE_URL)
+    raw_doc_store = S3GPRawDocumentStore(bucket=shared_settings.S3_GP_BUCKET_NAME, raw_prefix=shared_settings.S3_GP_RAW_PREFIX)
+    manifest_repository = ManifestRepository(table_name=indexing_settings.DYNAMODB_MANIFEST_TABLE_NAME)      
+    chunk_store = S3GPChunkStore(bucket=shared_settings.S3_GP_BUCKET_NAME, chunks_prefix=shared_settings.S3_GP_CHUNK_PREFIX)
+    vector_store = S3VectorStore(bucket=indexing_settings.S3_VECTOR_BUCKET_NAME, vector_index=indexing_settings.S3_VECTOR_INDEX_NAME)
+    corpus_change_table = CorpusChangeTable(table_name=shared_settings.DYNAMODB_CORPUS_CHANGE_TABLE_NAME)
+    bm25_update_message_sender = BM25UpdateEventService(queue_url=indexing_settings.SQS_BM25_UPDATE_QUEUE_URL)
     domain_lexicon_store = DomainLexiconStore(
-        collection_term_stats_table_name=settings.DYNAMODB_COLLECTION_TERM_STATS_TABLE_NAME,
-        doc_term_stats_table_name=settings.DYNAMODB_DOC_TERM_STATS_TABLE_NAME,
+        collection_term_stats_table_name=shared_settings.DYNAMODB_COLLECTION_TERM_STATS_TABLE_NAME,
+        doc_term_stats_table_name=shared_settings.DYNAMODB_DOC_TERM_STATS_TABLE_NAME,
     )
 
 
@@ -135,7 +136,7 @@ def deletion_handler(event, context):
                 continue
 
             # Verify bucket of deleted object and guard against deletions from unrelated buckets
-            if bucket != settings.S3_GP_BUCKET_NAME:
+            if bucket != shared_settings.S3_GP_BUCKET_NAME:
                 logger.warning(
                     f"Deletion skip s3 event: delete event from unrelated bucket (sqs_message_id={sqs_message_id} bucket={bucket})"
                 )

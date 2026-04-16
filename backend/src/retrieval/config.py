@@ -8,20 +8,11 @@ ENV_FILE_PATH = Path(__file__).resolve().parent / ".env.local"
 
 
 class Settings(BaseSettings):
-    # Storage inputs used by RetrievalOrchestrator initialization
-    S3_GP_BUCKET_NAME: str
-    S3_GP_CHUNK_PREFIX: str = "chunks"
-
-    # Manifest/corpus state used to detect and load indexed corpus
-    DYNAMODB_MANIFEST_TABLE_NAME: str
-    DYNAMODB_CORPUS_CHANGE_TABLE_NAME: str
 
     # Retrieval model settings (optional until wired)
-    RETRIEVAL_LLM_MODEL_ID: Optional[str] = None
+    RETRIEVAL_MODEL_ID: Optional[str] = None
 
-    # BM25 snapshot polling settings
-    BM25_POINTER_KEY: str = "bm25/pointer.json"
-    BM25_SNAPSHOT_KEY: str = "bm25/snapshot.json"
+    # BM25 snapshot polling setting
     BM25_POLL_INTERVAL_SECONDS: int = 5
 
     model_config = ConfigDict(

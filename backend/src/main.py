@@ -8,31 +8,29 @@ from pydantic import BaseModel
 from fastapi import FastAPI, UploadFile, File
 from fastapi import HTTPException
 from typing import List, Literal, Optional
-from .indexing.config import settings as indexing_settings
 from .indexing.services.manifest_repository import ManifestRepository
 from .indexing.services.s3_gp_raw_document_store import S3GPRawDocumentStore
-from .retrieval.config import settings as retrieval_settings
 from .retrieval.retrieval_orchestrator import RetrievalOrchestrator
 from langchain_core.documents import Document
+
+from .indexing.config import settings as indexing_settings
+from .retrieval.config import settings as retrieval_settings
+from .shared.config import settings as shared_settings
 
 app = FastAPI()
 logger = logging.getLogger(__name__)
 raw_doc_store = S3GPRawDocumentStore(
-    bucket=indexing_settings.S3_GP_BUCKET_NAME,
-    raw_prefix=indexing_settings.S3_GP_RAW_PREFIX,
+    bucket=shared_settings.S3_GP_BUCKET_NAME,
+    raw_prefix=shared_settings.S3_GP_RAW_PREFIX,
 )
-manifest_repository = (
-    ManifestRepository(table_name=indexing_settings.DYNAMODB_MANIFEST_TABLE_NAME)
-    if indexing_settings.DYNAMODB_MANIFEST_TABLE_NAME
-    else None
-)
+manifest_repository = ManifestRepository(table_name=indexing_settings.DYNAMODB_MANIFEST_TABLE_NAME)
 retrieval_orchestrator = RetrievalOrchestrator(
-    manifest_table_name=retrieval_settings.DYNAMODB_MANIFEST_TABLE_NAME,
-    corpus_change_table_name=retrieval_settings.DYNAMODB_CORPUS_CHANGE_TABLE_NAME,
-    s3_gp_bucket_name=retrieval_settings.S3_GP_BUCKET_NAME,
-    chunks_prefix=retrieval_settings.S3_GP_CHUNK_PREFIX,
-    bm25_pointer_key=retrieval_settings.BM25_POINTER_KEY,
-    bm25_snapshot_key=retrieval_settings.BM25_SNAPSHOT_KEY,
+    manifest_table_name=indexing_settings.DYNAMODB_MANIFEST_TABLE_NAME,
+    corpus_change_table_name=shared_settings.DYNAMODB_CORPUS_CHANGE_TABLE_NAME,
+    s3_gp_bucket_name=shared_settings.S3_GP_BUCKET_NAME,
+    chunks_prefix=shared_settings.S3_GP_CHUNK_PREFIX,
+    bm25_pointer_key=shared_settings.BM25_POINTER_KEY,
+    bm25_snapshot_key=shared_settings.BM25_SNAPSHOT_KEY,
     bm25_poll_interval_seconds=retrieval_settings.BM25_POLL_INTERVAL_SECONDS,
 )
 
