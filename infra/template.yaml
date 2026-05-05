@@ -305,9 +305,26 @@ Resources:
       AttributeDefinitions:
         - AttributeName: term
           AttributeType: S
+        - AttributeName: prefix1
+          AttributeType: S
+        - AttributeName: prefix2
+          AttributeType: S
       KeySchema:
         - AttributeName: term
           KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: prefix1-index
+          KeySchema: 
+          - AttributeName: prefix1
+            KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: prefix2-index
+          KeySchema: 
+          - AttributeName: prefix2
+            KeyType: HASH
+          Projection:
+            ProjectionType: ALL
       SSESpecification:
         SSEEnabled: true
 

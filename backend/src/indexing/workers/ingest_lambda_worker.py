@@ -10,7 +10,7 @@ from ...shared.services.s3_vector_store import S3VectorStore, VectorRecord
 from ...shared.services.corpus_change_table import CorpusChangeTable
 from ..services.bm25_update_event_publisher import BM25UpdateEventService
 from ..services.document_terms_extractor import build_term_frequency_dict
-from ...shared.services.domain_lexicon_store import DomainLexiconStore
+from ...shared.services.domain_lexicon_store import DomainLexiconWriter
 from ..config import settings as indexing_settings
 from ...shared.config import settings as shared_settings
 
@@ -62,7 +62,7 @@ def ingestion_handler(event, context):
     vector_store = S3VectorStore(bucket=indexing_settings.S3_VECTOR_BUCKET_NAME, vector_index=indexing_settings.S3_VECTOR_INDEX_NAME)
     corpus_change_table = CorpusChangeTable(table_name=shared_settings.DYNAMODB_CORPUS_CHANGE_TABLE_NAME)
     bm25_update_message_sender = BM25UpdateEventService(queue_url=indexing_settings.SQS_BM25_UPDATE_QUEUE_URL)
-    domain_lexicon_store = DomainLexiconStore(
+    domain_lexicon_writer = DomainLexiconWriter(
         collection_term_stats_table_name=shared_settings.DYNAMODB_COLLECTION_TERM_STATS_TABLE_NAME,
         doc_term_stats_table_name=shared_settings.DYNAMODB_DOC_TERM_STATS_TABLE_NAME,
     )
@@ -250,7 +250,7 @@ def ingestion_handler(event, context):
 
             # Upsert the document's term-tf mappings into domain lexicon db
             try:
-                domain_lexicon_upsert_response = domain_lexicon_store.upsert_document_terms(doc_id=doc_id, terms=tf_dict_for_doc)
+                domain_lexicon_upsert_response = domain_lexicon_writer.upsert_document_terms(doc_id=doc_id, terms=tf_dict_for_doc)
                 logger.info(json.dumps(
                     {
                         "event": "domain_lexicon_db_upload_success",

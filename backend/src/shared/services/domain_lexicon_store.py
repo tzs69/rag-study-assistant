@@ -2,10 +2,14 @@ from typing import Any, Dict, List, Set, Tuple
 from nltk.util import ngrams
 from botocore.exceptions import ClientError
 from ..clients.dynamodb_client import DyanmoDBClient
+from ..utils.build_term_features import build_term_features
 
-
-class DomainLexiconStore:
-    def __init__(self, collection_term_stats_table_name: str, doc_term_stats_table_name: str):
+class DomainLexiconWriter:
+    def __init__(
+            self, 
+            collection_term_stats_table_name: str, 
+            doc_term_stats_table_name: str, 
+        ):
         if not collection_term_stats_table_name or not str(collection_term_stats_table_name).strip():
             raise ValueError("collection_term_stats_table_name is required")
         if not doc_term_stats_table_name or not str(doc_term_stats_table_name).strip():
@@ -71,7 +75,7 @@ class DomainLexiconStore:
         for term, doc_tf in terms.items():
             if doc_tf <= 0:
                 continue
-            prefix1, prefix2, bigrams = self._build_term_features(term)
+            prefix1, prefix2, bigrams = build_term_features(term)
             self.dynamodb.client.put_item(
                 TableName=self.doc_term_stats_table_name,
                 Item={
@@ -155,14 +159,6 @@ class DomainLexiconStore:
             "total_terms_processed": num_terms_in_doc,
         }        
         return summary
-
-
-    def _build_term_features(self, term: str) -> Tuple[str, str | None, List[str]]:
-        """Build deterministic per-term features used by retrieval spell-correction."""
-        prefix1 = term[0]
-        prefix2 = term[:2] if len(term) >= 2 else None
-        bigrams = sorted({"".join(bigram) for bigram in ngrams(term, n=2)})
-        return prefix1, prefix2, bigrams
 
 
     def _query_doc_term_rows(self, doc_id: str) -> List[Tuple[str, int]]:
@@ -305,3 +301,137 @@ class DomainLexiconStore:
                 if not pending:
                     break
                 request_items = {self.collection_term_stats_table_name: pending}
+
+
+class DomainLexiconReader:
+    def __init__(
+            self, 
+            collection_term_stats_table_name: str, 
+            prefix1_gsi_name: str = "prefix1-index",
+            prefix2_gsi_name: str = "prefix2-index"
+        ):
+        if not collection_term_stats_table_name or not str(collection_term_stats_table_name).strip():
+            raise ValueError("collection_term_stats_table_name is required")
+        self.collection_term_stats_table_name = collection_term_stats_table_name
+        self.prefix1_gsi_name = prefix1_gsi_name
+        self.prefix2_gsi_name = prefix2_gsi_name
+        self.dynamodb = DyanmoDBClient(collection_term_stats_table_name)
+
+
+    def query_on_prefix(self, prefix_val: str, prefix1: bool) -> Dict[str, Dict[str, int | List[str]]]:
+        """
+        Query collection term stats by prefix index and return term metadata for spell-correction candidate generation.
+
+        This function:
+         - chooses which GSI to query based on prefix mode and prefix length
+            - prefix1 mode requires prefix_val length of 1
+            - prefix2 mode requires prefix_val length of 2
+         - queries the collection term stats table on the selected prefix index
+         - paginates through all query pages using LastEvaluatedKey
+         - extracts and converts term metadata into a plain in-memory dictionary
+
+        Args:
+         - prefix_val: prefix value used for lookup
+         - prefix1: mode selector boolean flag
+            - True -> query prefix1 index
+            - False -> query prefix2 index
+
+        Returns:
+         - dictionary where:
+            - key is term string
+            - value is metadata dictionary containing:
+                - bigrams: list of bigram strings
+                - collection_tf: collection term frequency as int
+                - doc_freq: document frequency as int
+
+        If prefix mode and prefix length are incompatible, returns empty dictionary.
+        """
+
+        if prefix1 and len(prefix_val) == 1:
+            gsi_to_query = self.prefix1_gsi_name
+            condition_attr_name = "prefix1"
+        elif not prefix1 and len(prefix_val) == 2:
+            gsi_to_query = self.prefix2_gsi_name
+            condition_attr_name = "prefix2"
+        else:
+            return {}
+
+        out_dict: Dict[str, Dict[str, int | List[str]]] = {}
+
+        prefix_val = prefix_val.lower()
+        query_kwargs: Dict[str, Any] = {
+            "TableName": self.collection_term_stats_table_name,
+            "IndexName": gsi_to_query,
+            "KeyConditionExpression": f"{condition_attr_name} = :prefix_val",
+            "ExpressionAttributeValues": {":prefix_val": {"S": prefix_val}},
+            "ProjectionExpression": "term, collection_tf, doc_freq, bigrams"
+        }
+        while True:
+            response = self.dynamodb.client.query(**query_kwargs)
+            items = response.get("Items", [])
+            for item in items:
+
+                # Read term (base key) from DynamoDB item
+                term = item.get("term", {}).get("S", "")
+
+                # Read and coerce collection-level term frequency to int
+                collection_tf = item.get("collection_tf", {})
+                collection_tf = int(collection_tf.get("N", "0"))
+
+                # Read and coerce document frequency to int
+                doc_freq = item.get("doc_freq", {})
+                doc_freq = int(doc_freq.get("N", "0"))
+
+                # Decode DynamoDB List attribute for bigrams into plain List[str]
+                bigrams = item.get("bigrams", {}).get("L", [])
+                if bigrams:
+                    bigrams: List[str] = [bigram.get("S", "") for bigram in bigrams if bigram.get("S")]
+
+                if term:
+                    out_dict[term] = {
+                        "bigrams": bigrams,
+                        "collection_tf": collection_tf,
+                        "doc_freq": doc_freq
+                    }
+
+            last_evaluated_key = response.get("LastEvaluatedKey")
+            if not last_evaluated_key:
+                break
+            query_kwargs["ExclusiveStartKey"] = last_evaluated_key
+        return out_dict
+
+
+    def contains_term(self, term: str) -> bool:
+        """
+        Perform a point lookup on collection_term_stats by term primary key and
+        verify minimal payload integrity.
+        
+        Returns:
+         - True if term exists and required key fields are present with valid values
+         - False otherwise
+        """
+        term = term.lower()
+        get_kwargs: Dict[str, Any] = {
+            "TableName": self.collection_term_stats_table_name,
+            "Key": {"term": {"S": term}},
+            "ProjectionExpression": "term, collection_tf, doc_freq",
+        }
+        response = self.dynamodb.client.get_item(**get_kwargs)
+        item = response.get("Item")
+        if not item:
+            return False
+
+        term_attr = item.get("term", {}).get("S", "")
+        collection_tf_attr = item.get("collection_tf", {}).get("N")
+        doc_freq_attr = item.get("doc_freq", {}).get("N")
+
+        if not term_attr or collection_tf_attr is None or doc_freq_attr is None:
+            return False
+
+        try:
+            collection_tf = int(collection_tf_attr)
+            doc_freq = int(doc_freq_attr)
+        except (TypeError, ValueError):
+            return False
+
+        return collection_tf > 0 and doc_freq > 0

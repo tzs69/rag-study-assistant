@@ -9,7 +9,7 @@ from ..services.manifest_repository import ManifestRepository
 from ...shared.services.s3_gp_chunk_store import S3GPChunkStore
 from ...shared.services.s3_vector_store import S3VectorStore
 from ...shared.services.corpus_change_table import CorpusChangeTable
-from ...shared.services.domain_lexicon_store import DomainLexiconStore
+from ...shared.services.domain_lexicon_store import DomainLexiconWriter
 from ..services.bm25_update_event_publisher import BM25UpdateEventService
 
 from ..config import settings as indexing_settings
@@ -54,7 +54,7 @@ def deletion_handler(event, context):
     vector_store = S3VectorStore(bucket=indexing_settings.S3_VECTOR_BUCKET_NAME, vector_index=indexing_settings.S3_VECTOR_INDEX_NAME)
     corpus_change_table = CorpusChangeTable(table_name=shared_settings.DYNAMODB_CORPUS_CHANGE_TABLE_NAME)
     bm25_update_message_sender = BM25UpdateEventService(queue_url=indexing_settings.SQS_BM25_UPDATE_QUEUE_URL)
-    domain_lexicon_store = DomainLexiconStore(
+    domain_lexicon_writer = DomainLexiconWriter(
         collection_term_stats_table_name=shared_settings.DYNAMODB_COLLECTION_TERM_STATS_TABLE_NAME,
         doc_term_stats_table_name=shared_settings.DYNAMODB_DOC_TERM_STATS_TABLE_NAME,
     )
@@ -204,7 +204,7 @@ def deletion_handler(event, context):
 
             # Delete doc-associated term mappings from domain lexicon db
             try:
-                domain_lexicon_delete_response = domain_lexicon_store.delete_document(doc_id=doc_id)
+                domain_lexicon_delete_response = domain_lexicon_writer.delete_document(doc_id=doc_id)
                 logger.info(json.dumps(
                     {
                         "event": "domain_lexicon_db_delete_success",
