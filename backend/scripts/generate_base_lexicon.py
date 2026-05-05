@@ -37,7 +37,7 @@ import logging
 import re
 
 
-K = 20000
+K = 100000
 LANGUAGE = "en"
 BASE_LEXICON_OUT_FILE = "backend/src/retrieval/data/base_english_lexicon.json"
 

@@ -1,6 +1,7 @@
 import logging
+from pathlib import Path
 from threading import Event, Lock, Thread
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from ..shared.services.chunk_index import InMemoryChunkIndex
 from ..indexing.services.indexed_documents_loader import load_indexed_documents
@@ -9,7 +10,11 @@ from ..indexing.services.manifest_repository import ManifestRepository
 from ..shared.services.s3_base_store import BaseStore
 from ..shared.services.s3_gp_chunk_store import S3GPChunkStore
 from .services.keyword_retriever import KeywordSearchService
+from .services.query_basic_normalizer import basic_query_normalize
+from .services.spell_correction.spell_correction_query_preprocessor import extract_for_spell_correction
+from .services.spell_correction.spell_corrector import SpellCorrector
 from ..shared.services.latest_bm25_pointer_loader import load_latest_pointer
+from .retrieval_types import QueryCorrectionResult
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +30,9 @@ class RetrievalOrchestrator:
             bm25_pointer_key: str = "bm25/pointer.json",
             bm25_snapshot_key: str = "bm25/snapshot.json",
             bm25_poll_interval_seconds: int = 5,
+            enable_spell_correction: bool = False,
+            collection_term_stats_table_name: Optional[str] = None,
+            base_english_lexicon_path: Optional[str] = None,
             chat_history: Optional[List[Dict[str, Any]]] = None,
         ):
         self.corpus_change_table_name = corpus_change_table_name
@@ -38,6 +46,7 @@ class RetrievalOrchestrator:
         self.bm25_snapshot_key = bm25_snapshot_key
         self.bm25_poll_interval_seconds = max(1, int(bm25_poll_interval_seconds))
         self.latest_pointer_version = 0
+        self.enable_spell_correction = bool(enable_spell_correction)
 
         documents_by_chunk_id, doc_chunk_index = load_indexed_documents(
             manifest_repository=self.manifest_table,
@@ -59,7 +68,54 @@ class RetrievalOrchestrator:
         # Best-effort bootstrap from latest BM25 snapshot if already available.
         self._apply_bm25_index_refresh()
 
+        self.spell_corrector: Optional[SpellCorrector] = None
+        if self.enable_spell_correction:
+            if not collection_term_stats_table_name:
+                logger.warning(
+                    "Spell correction enabled but collection_term_stats_table_name missing; disabling spell correction."
+                )
+                self.enable_spell_correction = False
+            else:
+                self.spell_corrector = SpellCorrector(
+                    collection_term_stats_table_name=collection_term_stats_table_name,
+                    base_english_lexicon_path=Path(base_english_lexicon_path).resolve()
+                    if base_english_lexicon_path
+                    else None,
+                )
+
         self.chat_history = chat_history
+
+
+    def search_documents(
+        self,
+        raw_query: str,
+        top_k: int = 5,
+    ) -> Tuple[List[Any], str, Optional[QueryCorrectionResult]]:
+        """
+        Search BM25 documents with optional query spell correction.
+
+        Returns:
+            Tuple[List[Any], str, Optional[QueryCorrectionResult]]:
+                - ranked documents
+                - query actually used for retrieval
+                - correction metadata when spell correction ran
+        """
+        correction_result: Optional[QueryCorrectionResult] = None
+        normalized_query = basic_query_normalize(raw_query)
+        query_for_retrieval = normalized_query
+
+        if self.enable_spell_correction and self.spell_corrector:
+            try:
+                normalized_spell_correction_query = extract_for_spell_correction(normalized_query)
+                correction_result = self.spell_corrector.spell_correct_extracted_query(normalized_spell_correction_query)
+                query_for_retrieval = correction_result.corrected_query # Overwrite normalized query with spell corrected query
+            except Exception:
+                logger.exception("Spell correction failed; falling back to original query")
+
+        with self._state_lock:
+            ranked_documents = self.bm25_retriever.search(query_for_retrieval, top_k=top_k)
+
+        return ranked_documents, query_for_retrieval, correction_result
 
 
     def start_background_polling(self) -> None:
@@ -139,4 +195,3 @@ class RetrievalOrchestrator:
             self.latest_pointer_version = retrieved_latest_pointer_version
 
         return True
-

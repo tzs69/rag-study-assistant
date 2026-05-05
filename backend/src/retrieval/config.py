@@ -15,6 +15,10 @@ class Settings(BaseSettings):
     # BM25 snapshot polling setting
     BM25_POLL_INTERVAL_SECONDS: int = 5
 
+    # Feature flag for retrieval-time spell correction
+    ENABLE_SPELL_CORRECTION: bool = False
+
+    BASE_ENGLISH_LEXICON_PATH: str = "src/retrieval/data/base_english_lexicon.json"
     model_config = ConfigDict(
         env_file_encoding="utf-8",
         extra="ignore",

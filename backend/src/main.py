@@ -11,7 +11,6 @@ from typing import List, Literal, Optional
 from .indexing.services.manifest_repository import ManifestRepository
 from .indexing.services.s3_gp_raw_document_store import S3GPRawDocumentStore
 from .retrieval.retrieval_orchestrator import RetrievalOrchestrator
-from langchain_core.documents import Document
 
 from .indexing.config import settings as indexing_settings
 from .retrieval.config import settings as retrieval_settings
@@ -32,6 +31,9 @@ retrieval_orchestrator = RetrievalOrchestrator(
     bm25_pointer_key=shared_settings.BM25_POINTER_KEY,
     bm25_snapshot_key=shared_settings.BM25_SNAPSHOT_KEY,
     bm25_poll_interval_seconds=retrieval_settings.BM25_POLL_INTERVAL_SECONDS,
+    enable_spell_correction=retrieval_settings.ENABLE_SPELL_CORRECTION,
+    collection_term_stats_table_name=shared_settings.DYNAMODB_COLLECTION_TERM_STATS_TABLE_NAME,
+    base_english_lexicon_path=retrieval_settings.BASE_ENGLISH_LEXICON_PATH,
 )
 
 
@@ -153,13 +155,23 @@ def chat(req: ChatRequest):
 
         # placeholder for now
         # answer = f"{user_query} testing_123"
-        top_k_document: List[Document] = retrieval_orchestrator.bm25_retriever.search(user_query, top_k=5)
+        top_k_document, query_for_retrieval, correction_result = retrieval_orchestrator.search_documents(
+            raw_query=user_query,
+            top_k=5,
+        )
         if not top_k_document:
             return ChatResponse(answer="I couldn't find relevant content for that query in the indexed documents.")
 
         answer_lines: List[str] = []
+        if correction_result and correction_result.used_spell_correction:
+            answer_lines.append(
+                f"Spell correction applied: {correction_result.original_query} -> {correction_result.corrected_query} "
+                f"(tokens corrected: {correction_result.num_tokens_corrected})"
+            )
+            answer_lines.append("")
+
         for rank, document in enumerate(top_k_document, start=1):
-            snippet = _extract_snippet(document.page_content, user_query)
+            snippet = _extract_snippet(document.page_content, query_for_retrieval)
             answer_lines.append(f"{rank}) {snippet}")
 
         return ChatResponse(answer="\n".join(answer_lines))
