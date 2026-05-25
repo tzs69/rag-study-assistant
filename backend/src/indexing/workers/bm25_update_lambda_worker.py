@@ -7,7 +7,8 @@ from botocore.exceptions import ClientError
 from langchain_community.retrievers import BM25Retriever
 from langchain_core.documents import Document
 
-from ..config import settings
+from ..config import settings as indexing_settings
+from ...shared.config import settings as shared_settings
 from ..services.manifest_repository import ManifestRepository
 from ..services.indexed_documents_loader import load_indexed_documents
 from ..services.latest_chunk_index_loader import load_chunk_index_from_latest_snapshot
@@ -17,12 +18,11 @@ from ...shared.services.corpus_delta_applier import apply_changes
 from ...shared.services.corpus_monitor import CorpusMonitor
 from ...shared.services.s3_base_store import BaseStore
 from ...shared.services.s3_gp_chunk_store import S3GPChunkStore
+from ...shared.services.latest_bm25_pointer_loader import load_latest_pointer
+
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
-
-POINTER_KEY = "bm25/pointer.json"
-SNAPSHOT_KEY = "bm25/snapshot.json"
 
 def bm25_update_handler(event, context):
     """
@@ -45,7 +45,7 @@ def bm25_update_handler(event, context):
     3. Read BM25 pointer (bm25/pointer.json) and compare versions.
        - If pointer version >= target version, skip rebuild and return success.
     4. Build baseline in-memory chunk index.
-       - Prefer warm-start from latest snapshot (SNAPSHOT_KEY).
+       - Prefer warm-start from latest snapshot (shared_settings.BM25_SNAPSHOT_KEY).
        - Fallback to manifest bootstrap (status == "indexed") if snapshot is unavailable.
     5. Query corpus-change deltas newer than pointer version and apply net changes
        (upsert/delete) to in-memory state.
@@ -120,13 +120,13 @@ def bm25_update_handler(event, context):
         target_version = max(event_payload["corpus_version"] for event_payload in valid_events)
         coalesced_event_count = len(_coalesce_by_doc_latest(valid_events))
 
-        manifest_repository = ManifestRepository(table_name=settings.DYNAMODB_MANIFEST_TABLE_NAME)
-        base_store = BaseStore(bucket=settings.S3_GP_BUCKET_NAME, vectors=False)
-        chunk_store = S3GPChunkStore(bucket=settings.S3_GP_BUCKET_NAME, chunks_prefix=settings.S3_GP_CHUNK_PREFIX)
-        corpus_monitor = CorpusMonitor(table_name=settings.DYNAMODB_CORPUS_CHANGE_TABLE_NAME)
+        manifest_repository = ManifestRepository(table_name=indexing_settings.DYNAMODB_MANIFEST_TABLE_NAME)
+        base_store = BaseStore(bucket=shared_settings.S3_GP_BUCKET_NAME, vectors=False)
+        chunk_store = S3GPChunkStore(bucket=shared_settings.S3_GP_BUCKET_NAME, chunks_prefix=shared_settings.S3_GP_CHUNK_PREFIX)
+        corpus_monitor = CorpusMonitor(table_name=shared_settings.DYNAMODB_CORPUS_CHANGE_TABLE_NAME)
 
         # Get latest pointer version pointer to compare against target_version for this update batch before commencing updates. 
-        latest_pointer = _load_latest_pointer(base_store=base_store)
+        latest_pointer = load_latest_pointer(base_store=base_store, pointer_key=shared_settings.BM25_POINTER_KEY)
         latest_pointer_version = int(latest_pointer.get("corpus_version", 0))
 
         # If latest pointer version is already ahead of target_version, skip update processing to avoid redundant work.
@@ -148,8 +148,8 @@ def bm25_update_handler(event, context):
         # - Prefer latest persisted BM25 snapshot for cheap warm-start.
         # - Fall back to indexed-doc bootstrap (from manifest table) when no snapshot exists yet.
         chunk_index = load_chunk_index_from_latest_snapshot(
-            bucket=settings.S3_GP_BUCKET_NAME,
-            snapshot_key=SNAPSHOT_KEY,
+            bucket=shared_settings.S3_GP_BUCKET_NAME,
+            snapshot_key=shared_settings.BM25_SNAPSHOT_KEY,
             base_store=base_store
         )
         if chunk_index is None:
@@ -211,7 +211,7 @@ def bm25_update_handler(event, context):
         }
         base_store.s3.client.put_object(
             Bucket=base_store.bucket,
-            Key=SNAPSHOT_KEY,
+            Key=shared_settings.BM25_SNAPSHOT_KEY,
             Body=json.dumps(snapshot_payload).encode("utf-8"),
             ContentType="application/json",
         )
@@ -219,12 +219,12 @@ def bm25_update_handler(event, context):
         # Update and persist pointer after snapshot successfully persisted.
         pointer_payload = {
             "corpus_version": snapshot_version,
-            "s3_key": SNAPSHOT_KEY,
+            "s3_key": shared_settings.BM25_SNAPSHOT_KEY,
             "updated_at_utc": built_at_utc,
         }
         base_store.s3.client.put_object(
             Bucket=base_store.bucket,
-            Key=POINTER_KEY,
+            Key=shared_settings.BM25_POINTER_KEY,
             Body=json.dumps(pointer_payload).encode("utf-8"),
             ContentType="application/json",
         )
@@ -235,7 +235,7 @@ def bm25_update_handler(event, context):
                     "event": "bm25_snapshot_publish_success",
                     "aws_request_id": req_id,
                     "target_version": snapshot_version,
-                    "snapshot_key": SNAPSHOT_KEY,
+                    "snapshot_key": shared_settings.BM25_SNAPSHOT_KEY,
                     "doc_count": len(doc_chunk_index),
                     "chunk_count": len(all_documents),
                     "coalesced_event_count": coalesced_event_count,
@@ -249,31 +249,6 @@ def bm25_update_handler(event, context):
             f"BM25 snapshot rebuild failed (aws_request_id={req_id} valid_record_count={len(valid_message_ids)})"
         )
         return {"batchItemFailures": _to_batch_failures(valid_message_ids)}
-
-
-def _load_latest_pointer(
-    *,
-    base_store: BaseStore
-) -> Dict[str, Any]:
-    """Load the BM25 pointer JSON; fallback and return empty dict if missing."""
-    try:
-        response = base_store.s3.client.get_object(
-            Bucket=base_store.bucket, 
-            Key=POINTER_KEY
-        )
-        raw_bytes_payload = response["Body"].read()
-        latest_pointer = json.loads(raw_bytes_payload.decode("utf-8"))
-
-        if not isinstance(latest_pointer, dict):
-            return {}
-        
-        return latest_pointer
-    
-    except ClientError as e:
-        code = e.response.get("Error", {}).get("Code")
-        if code in ("NoSuchKey", "404"):
-            return {}
-        raise
 
 
 def _normalize_event_payload(payload: Dict[str, Any]) -> Dict[str, Any] | None:

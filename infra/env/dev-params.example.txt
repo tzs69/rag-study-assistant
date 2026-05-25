@@ -15,6 +15,9 @@ S3VectorBucketName=vector-store-sam
 S3VectorIndexName=chunk-embeddings-vector-index-sam
 
 DynamoManifestTableName=document-vector-manifest-sam
+DynamoCorpusChangeTableName=corpus-change-table-sam
+DynamoCollectionTermStatsTableName=collection-term-stats-sam
+DynamoDocTermStatsTableName=doc-term-stats-sam
 
 IngestionQueueName=ingest-queue-sam
 IngestionDlqName=ingest-dlq-sam

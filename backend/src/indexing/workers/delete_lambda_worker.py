@@ -9,9 +9,11 @@ from ..services.manifest_repository import ManifestRepository
 from ...shared.services.s3_gp_chunk_store import S3GPChunkStore
 from ...shared.services.s3_vector_store import S3VectorStore
 from ...shared.services.corpus_change_table import CorpusChangeTable
+from ...shared.services.domain_lexicon_store import DomainLexiconWriter
 from ..services.bm25_update_event_publisher import BM25UpdateEventService
 
-from ..config import settings
+from ..config import settings as indexing_settings
+from ...shared.config import settings as shared_settings
 
 def deletion_handler(event, context):
     """
@@ -46,12 +48,16 @@ def deletion_handler(event, context):
     )
 
     # Initialize helper classes
-    raw_doc_store = S3GPRawDocumentStore(bucket=settings.S3_GP_BUCKET_NAME, raw_prefix=settings.S3_GP_RAW_PREFIX)
-    manifest_repository = ManifestRepository(table_name=settings.DYNAMODB_MANIFEST_TABLE_NAME)      
-    chunk_store = S3GPChunkStore(bucket=settings.S3_GP_BUCKET_NAME, chunks_prefix=settings.S3_GP_CHUNK_PREFIX)
-    vector_store = S3VectorStore(bucket=settings.S3_VECTOR_BUCKET_NAME, vector_index=settings.S3_VECTOR_INDEX_NAME)
-    corpus_change_table = CorpusChangeTable(table_name=settings.DYNAMODB_CORPUS_CHANGE_TABLE_NAME)
-    bm25_update_message_sender = BM25UpdateEventService(queue_url=settings.SQS_BM25_UPDATE_QUEUE_URL)
+    raw_doc_store = S3GPRawDocumentStore(bucket=shared_settings.S3_GP_BUCKET_NAME, raw_prefix=shared_settings.S3_GP_RAW_PREFIX)
+    manifest_repository = ManifestRepository(table_name=indexing_settings.DYNAMODB_MANIFEST_TABLE_NAME)      
+    chunk_store = S3GPChunkStore(bucket=shared_settings.S3_GP_BUCKET_NAME, chunks_prefix=shared_settings.S3_GP_CHUNK_PREFIX)
+    vector_store = S3VectorStore(bucket=indexing_settings.S3_VECTOR_BUCKET_NAME, vector_index=indexing_settings.S3_VECTOR_INDEX_NAME)
+    corpus_change_table = CorpusChangeTable(table_name=shared_settings.DYNAMODB_CORPUS_CHANGE_TABLE_NAME)
+    bm25_update_message_sender = BM25UpdateEventService(queue_url=indexing_settings.SQS_BM25_UPDATE_QUEUE_URL)
+    domain_lexicon_writer = DomainLexiconWriter(
+        collection_term_stats_table_name=shared_settings.DYNAMODB_COLLECTION_TERM_STATS_TABLE_NAME,
+        doc_term_stats_table_name=shared_settings.DYNAMODB_DOC_TERM_STATS_TABLE_NAME,
+    )
 
 
     for sqs_deletion_record in sqs_delete_events_list:
@@ -130,7 +136,7 @@ def deletion_handler(event, context):
                 continue
 
             # Verify bucket of deleted object and guard against deletions from unrelated buckets
-            if bucket != settings.S3_GP_BUCKET_NAME:
+            if bucket != shared_settings.S3_GP_BUCKET_NAME:
                 logger.warning(
                     f"Deletion skip s3 event: delete event from unrelated bucket (sqs_message_id={sqs_message_id} bucket={bucket})"
                 )
@@ -194,7 +200,25 @@ def deletion_handler(event, context):
                     )
                     manifest_repository.mark_manifest_failed(doc_id=doc_id, ingest=False, error_message=str(e))
                     raise RuntimeError(f"Chunk vectors delete failed for doc_id='{doc_id}'") from e
+
+
+            # Delete doc-associated term mappings from domain lexicon db
+            try:
+                domain_lexicon_delete_response = domain_lexicon_writer.delete_document(doc_id=doc_id)
+                logger.info(json.dumps(
+                    {
+                        "event": "domain_lexicon_db_delete_success",
+                        **domain_lexicon_delete_response
+                    }
+                ))
+            except Exception as e:
+                logger.exception(
+                    f"Domain lexicon db delete failed (doc_id={doc_id} sqs_message_id={sqs_message_id} aws_request_id={req_id})"
+                )
+                # Best-effort only: domain lexicon update is not part of the core indexing success contract
+                # In event of failure, log and continue (no error raise)
                 
+
             # Finalize deletion by clearing all vector keys for manifest row and updating status to `deleted`
             try:
                 finalize_deletion_response = manifest_repository.clear_vectors_finalize_deletion(

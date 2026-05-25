@@ -7,6 +7,7 @@ Responsibilities:
 - List raw files with frontend-oriented metadata shape
 """
 from fastapi import UploadFile
+from botocore.exceptions import ClientError
 from pathlib import PurePosixPath
 from typing import Any, Dict, List
 import uuid
@@ -86,7 +87,13 @@ class S3GPRawDocumentStore(BaseStore):
                 key = obj["Key"]
                 upload_date = obj["LastModified"]
 
-                head = self.s3.client.head_object(Bucket=self.bucket, Key=key)
+                try:
+                    head = self.s3.client.head_object(Bucket=self.bucket, Key=key)
+                except ClientError as e:
+                    code = e.response.get("Error", {}).get("Code")
+                    if code in ("404", "NoSuchKey", "NotFound"):
+                        continue
+                    raise
                 original_filename = head.get("Metadata", {}).get("original_filename")
 
                 docs_data_list.append(

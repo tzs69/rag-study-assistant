@@ -9,7 +9,10 @@ from ..services.embedding_service import EmbeddingService
 from ...shared.services.s3_vector_store import S3VectorStore, VectorRecord
 from ...shared.services.corpus_change_table import CorpusChangeTable
 from ..services.bm25_update_event_publisher import BM25UpdateEventService
-from ..config import settings
+from ..services.document_terms_extractor import build_term_frequency_dict
+from ...shared.services.domain_lexicon_store import DomainLexiconWriter
+from ..config import settings as indexing_settings
+from ...shared.config import settings as shared_settings
 
 from typing import List
 
@@ -51,14 +54,18 @@ def ingestion_handler(event, context):
     )
 
     # Initialize helper classes
-    document_reader = DocumentReaderService(bucket_name=settings.S3_GP_BUCKET_NAME)
-    manifest_repository = ManifestRepository(table_name=settings.DYNAMODB_MANIFEST_TABLE_NAME)      
-    chunking_service = SemanticChunkingService(chunking_llm_model_id=settings.CHUNKING_MODEL_ID)
-    chunk_store = S3GPChunkStore(bucket=settings.S3_GP_BUCKET_NAME, chunks_prefix=settings.S3_GP_CHUNK_PREFIX)
-    embedding_service = EmbeddingService(embedding_model_id=settings.EMBEDDING_MODEL_ID)
-    vector_store = S3VectorStore(bucket=settings.S3_VECTOR_BUCKET_NAME, vector_index=settings.S3_VECTOR_INDEX_NAME)
-    corpus_change_table = CorpusChangeTable(table_name=settings.DYNAMODB_CORPUS_CHANGE_TABLE_NAME)
-    bm25_update_message_sender = BM25UpdateEventService(queue_url=settings.SQS_BM25_UPDATE_QUEUE_URL)
+    document_reader = DocumentReaderService(bucket_name=shared_settings.S3_GP_BUCKET_NAME)
+    manifest_repository = ManifestRepository(table_name=indexing_settings.DYNAMODB_MANIFEST_TABLE_NAME)      
+    chunking_service = SemanticChunkingService(chunking_llm_model_id=indexing_settings.CHUNKING_MODEL_ID)
+    chunk_store = S3GPChunkStore(bucket=shared_settings.S3_GP_BUCKET_NAME, chunks_prefix=shared_settings.S3_GP_CHUNK_PREFIX)
+    embedding_service = EmbeddingService(embedding_model_id=shared_settings.EMBEDDING_MODEL_ID)
+    vector_store = S3VectorStore(bucket=indexing_settings.S3_VECTOR_BUCKET_NAME, vector_index=indexing_settings.S3_VECTOR_INDEX_NAME)
+    corpus_change_table = CorpusChangeTable(table_name=shared_settings.DYNAMODB_CORPUS_CHANGE_TABLE_NAME)
+    bm25_update_message_sender = BM25UpdateEventService(queue_url=indexing_settings.SQS_BM25_UPDATE_QUEUE_URL)
+    domain_lexicon_writer = DomainLexiconWriter(
+        collection_term_stats_table_name=shared_settings.DYNAMODB_COLLECTION_TERM_STATS_TABLE_NAME,
+        doc_term_stats_table_name=shared_settings.DYNAMODB_DOC_TERM_STATS_TABLE_NAME,
+    )
 
     for sqs_ingestion_record in event["Records"]:
         sqs_message_id = sqs_ingestion_record.get("messageId")
@@ -164,6 +171,8 @@ def ingestion_handler(event, context):
                 doc_text: DocumentText = document_reader.read_document_from_s3(doc_id=doc_id)
                 if not doc_text:
                     raise ValueError(f"Document text extraction failed for doc_id='{doc_id}'")
+                # Build term-tf after document with doc_text
+                tf_dict_for_doc = build_term_frequency_dict(doc_text=doc_text)
                 logger.info(json.dumps(
                     {
                         "event": "ingestion_read_success", 
@@ -173,7 +182,7 @@ def ingestion_handler(event, context):
                 ))
             except Exception as e:
                 logger.exception(
-                    f"Ingestion raw document read failed (doc_id=doc_id{doc_id} bucket={bucket} sqs_message_id={sqs_message_id} aws_request_id={req_id})",                    
+                    f"Ingestion raw document read failed (doc_id={doc_id} bucket={bucket} sqs_message_id={sqs_message_id} aws_request_id={req_id})",                    
                 )
                 manifest_repository.mark_manifest_failed(doc_id=doc_id, ingest=True, error_message=str(e))
                 raise RuntimeError(f"Document reading failed for doc_id='{doc_id}'") from e
@@ -238,6 +247,23 @@ def ingestion_handler(event, context):
                 manifest_repository.mark_manifest_failed(doc_id=doc_id, ingest=True, error_message=str(e))
                 raise RuntimeError(f"Vector embedding generation or vector upload failed for doc_id='{doc_id}'") from e
             
+
+            # Upsert the document's term-tf mappings into domain lexicon db
+            try:
+                domain_lexicon_upsert_response = domain_lexicon_writer.upsert_document_terms(doc_id=doc_id, terms=tf_dict_for_doc)
+                logger.info(json.dumps(
+                    {
+                        "event": "domain_lexicon_db_upload_success",
+                        **domain_lexicon_upsert_response
+                    }
+                ))
+            except Exception as e: 
+                logger.exception(
+                    f"Domain lexicon db upsert failed (doc_id={doc_id} sqs_message_id={sqs_message_id} aws_request_id={req_id})"
+                )
+                # Best-effort only: domain lexicon update is not part of the core indexing success contract
+                # In event of failure, log and continue (no error raise)
+
 
             # Finalize ingestion by updating manifest row with vector keys, changing status `indexed`
             try:

@@ -8,17 +8,17 @@ ENV_FILE_PATH = Path(__file__).resolve().parent / ".env.local"
 
 
 class Settings(BaseSettings):
-    # Storage inputs used by RetrievalOrchestrator initialization
-    S3_GP_BUCKET_NAME: str
-    S3_GP_CHUNK_PREFIX: str = "chunks"
-
-    # Manifest/corpus state used to detect and load indexed corpus
-    DYNAMODB_MANIFEST_TABLE_NAME: str
-    DYNAMODB_CORPUS_CHANGE_TABLE_NAME: str
 
     # Retrieval model settings (optional until wired)
-    RETRIEVAL_LLM_MODEL_ID: Optional[str] = None
+    RETRIEVAL_MODEL_ID: Optional[str] = None
 
+    # BM25 snapshot polling setting
+    BM25_POLL_INTERVAL_SECONDS: int = 5
+
+    # Feature flag for retrieval-time spell correction
+    ENABLE_SPELL_CORRECTION: bool = False
+
+    BASE_ENGLISH_LEXICON_PATH: str = "src/retrieval/data/base_english_lexicon.json"
     model_config = ConfigDict(
         env_file_encoding="utf-8",
         extra="ignore",

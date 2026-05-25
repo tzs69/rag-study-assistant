@@ -12,6 +12,9 @@ This folder contains the AWS infrastructure (SAM/CloudFormation) for the backend
 - Lambda event source mappings (SQS -> Lambda)
 - DynamoDB manifest table (`doc_id` keyed)
 - DynamoDB corpus change table (`pk + change_id` keyed change stream)
+- DynamoDB domain lexicon tables:
+  - `collection_term_stats` (`term` keyed collection stats)
+  - `doc_term_stats` (`doc_id + term` keyed doc-level term frequencies)
 - S3 Vectors vector bucket + vector index
 - IAM policies for S3 / SQS / DynamoDB / Bedrock / S3 Vectors worker access
 
@@ -53,6 +56,8 @@ SAM injects app runtime env vars into both Lambda workers, including:
 - `S3_VECTOR_INDEX_NAME` (actual created vector index name)
 - `DYNAMODB_MANIFEST_TABLE_NAME` (actual created DynamoDB table name)
 - `DYNAMODB_CORPUS_CHANGE_TABLE_NAME` (actual created DynamoDB table name)
+- `DYNAMODB_COLLECTION_TERM_STATS_TABLE_NAME` (actual created DynamoDB table name)
+- `DYNAMODB_DOC_TERM_STATS_TABLE_NAME` (actual created DynamoDB table name)
 - `CHUNKING_MODEL_ID`
 - `EMBEDDING_MODEL_ID`
 

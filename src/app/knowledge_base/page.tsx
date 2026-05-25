@@ -63,6 +63,10 @@ export default function KnowledgeBasePage() {
 
   useEffect(() => {
     refreshDocuments();
+    const pollTimer = setInterval(() => {
+      refreshDocuments();
+    }, 3000);
+    return () => clearInterval(pollTimer);
   }, []);
 
 

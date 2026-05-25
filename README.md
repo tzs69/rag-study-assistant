@@ -37,6 +37,34 @@ Planned next:
 - Harden API contracts and shared types between frontend/backend
 - Improve observability and test coverage (route contracts + end-to-end flows)
 
+## Tech Stack
+
+### Frontend
+- Next.js 16
+- React 19
+- TypeScript
+- Material UI (MUI) + Emotion
+- Tailwind CSS 4
+
+### Backend API
+- FastAPI
+- Pydantic + pydantic-settings
+- python-multipart
+
+### Retrieval / Indexing
+- LangChain ecosystem (`langchain-aws`, `langchain-experimental`, `langchain_community`)
+- `rank_bm25` (keyword retrieval)
+- `pypdf`, `python-docx` (document text extraction)
+
+### Infrastructure / Cloud
+- AWS SAM (CloudFormation)
+- AWS Lambda
+- Amazon S3 (raw docs + chunk artifacts)
+- Amazon SQS (+ DLQs)
+- Amazon DynamoDB
+- Amazon Bedrock
+- Amazon S3 Vectors
+
 ## High-Level Flow
 
 1. User uploads documents from the frontend.
@@ -44,6 +72,11 @@ Planned next:
 3. Backend stores raw docs in S3.
 4. S3 events trigger ingestion/deletion workers (via SQS) for downstream indexing lifecycle.
 5. Frontend fetches document list via `/api/documents`.
+
+## Indexing Demo
+
+https://github.com/user-attachments/assets/ad8b1e81-bc23-4858-84c2-17be012acbbf
+
 
 ## Local Development
 
