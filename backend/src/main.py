@@ -94,14 +94,21 @@ def list():
 
 @app.delete("/documents/{doc_id:path}")
 def delete(doc_id: str):
-    """Delete a raw document by exact S3 object key (`docId`)."""
+    """Delete an indexed raw document by exact S3 object key."""
     try:
+        status = manifest_repository.fetch_status_by_doc_ids(doc_ids=[doc_id]).get(doc_id)
+        if status != "indexed":
+            raise HTTPException(status_code=409, detail=f"Document cannot be deleted while status is {status}")
+        
         raw_doc_store.delete_raw_doc(doc_id)
+
         return {
             "ok": True, 
             "docId": doc_id, 
             "deleted": True
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception(f"Delete document failed for doc_id={doc_id}")
         raise HTTPException(status_code=500, detail=f"Failed to delete document {doc_id}: {str(e)}")
