@@ -86,24 +86,27 @@ class DomainLexiconWriter:
             )
 
             # 5(b)(c). Update collection-level term stats
+            set_expressions = [
+                "prefix1 = if_not_exists(prefix1, :prefix1)",
+                "bigrams = if_not_exists(bigrams, :bigrams)",
+                "collection_tf = if_not_exists(collection_tf, :zero) + :doc_tf",
+                "doc_freq = if_not_exists(doc_freq, :zero) + :one",
+            ]
+            attribute_values = {
+                ":prefix1": {"S": prefix1},
+                ":bigrams": {"L": [{"S": bigram} for bigram in bigrams]},
+                ":zero": {"N": "0"},
+                ":doc_tf": {"N": str(int(doc_tf))},
+                ":one": {"N": "1"},
+            }
+            if prefix2 is not None:
+                set_expressions.insert(1, "prefix2 = if_not_exists(prefix2, :prefix2)")
+                attribute_values[":prefix2"] = {"S": prefix2}
             self.dynamodb.client.update_item(
                 TableName=self.collection_term_stats_table_name,
                 Key={"term": {"S": term}},
-                UpdateExpression=(
-                    "SET prefix1 = if_not_exists(prefix1, :prefix1), "
-                    "prefix2 = if_not_exists(prefix2, :prefix2), "
-                    "bigrams = if_not_exists(bigrams, :bigrams), "
-                    "collection_tf = if_not_exists(collection_tf, :zero) + :doc_tf, "
-                    "doc_freq = if_not_exists(doc_freq, :zero) + :one"
-                ),
-                ExpressionAttributeValues={
-                    ":prefix1": {"S": prefix1},
-                    ":prefix2": {"S": prefix2} if prefix2 is not None else {"NULL": True},
-                    ":bigrams": {"L": [{"S": bigram} for bigram in bigrams]},
-                    ":zero": {"N": "0"},
-                    ":doc_tf": {"N": str(int(doc_tf))},
-                    ":one": {"N": "1"},
-                },
+                UpdateExpression="SET " + ", ".join(set_expressions),
+                ExpressionAttributeValues=attribute_values
             )
 
         # 6. Clean up empty terms in collection_term_stats (touched terms only)
