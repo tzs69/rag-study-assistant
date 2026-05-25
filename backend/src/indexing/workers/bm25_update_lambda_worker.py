@@ -126,7 +126,7 @@ def bm25_update_handler(event, context):
         corpus_monitor = CorpusMonitor(table_name=shared_settings.DYNAMODB_CORPUS_CHANGE_TABLE_NAME)
 
         # Get latest pointer version pointer to compare against target_version for this update batch before commencing updates. 
-        latest_pointer = load_latest_pointer(base_store=base_store, BM25_POINTER_KEY=shared_settings.BM25_POINTER_KEY)
+        latest_pointer = load_latest_pointer(base_store=base_store, pointer_key=shared_settings.BM25_POINTER_KEY)
         latest_pointer_version = int(latest_pointer.get("corpus_version", 0))
 
         # If latest pointer version is already ahead of target_version, skip update processing to avoid redundant work.

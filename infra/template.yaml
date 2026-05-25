@@ -70,6 +70,12 @@ Parameters:
   QueueVisibilityTimeoutSeconds:
     Type: Number
     Default: 360
+  BM25PointerKey:
+    Type: String
+    Default: bm25/pointer.json
+  BM25SnapshotKey:
+    Type: String
+    Default: bm25/snapshot.json
 
   ChunkingModelId:
     Type: String
@@ -115,6 +121,8 @@ Globals:
         EMBEDDING_MODEL_ID: !Ref EmbeddingModelId
         S3_VECTOR_INDEX_NAME: !Sub '${ProjectName}-${EnvironmentName}-${S3VectorIndexName}'
         SQS_BM25_UPDATE_QUEUE_URL: !Ref BM25UpdateQueue
+        BM25_POINTER_KEY: !Ref BM25PointerKey
+        BM25_SNAPSHOT_KEY: !Ref BM25SnapshotKey
     Tags:
       project: !Ref ProjectName
       env: !Ref EnvironmentName
