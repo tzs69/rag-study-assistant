@@ -28,6 +28,9 @@ retrieval_orchestrator = RetrievalOrchestrator(
     corpus_change_table_name=shared_settings.DYNAMODB_CORPUS_CHANGE_TABLE_NAME,
     s3_gp_bucket_name=shared_settings.S3_GP_BUCKET_NAME,
     chunks_prefix=shared_settings.S3_GP_CHUNK_PREFIX,
+    s3_vector_bucket_name=shared_settings.S3_VECTOR_BUCKET_NAME,
+    s3_vector_index_name=shared_settings.S3_VECTOR_INDEX_NAME,
+    embedding_model_id=shared_settings.EMBEDDING_MODEL_ID,
     bm25_pointer_key=shared_settings.BM25_POINTER_KEY,
     bm25_snapshot_key=shared_settings.BM25_SNAPSHOT_KEY,
     bm25_poll_interval_seconds=retrieval_settings.BM25_POLL_INTERVAL_SECONDS,
@@ -162,11 +165,11 @@ def chat(req: ChatRequest):
 
         # placeholder for now
         # answer = f"{user_query} testing_123"
-        top_k_document, query_for_retrieval, correction_result = retrieval_orchestrator.search_documents(
+        keyword_documents, semantic_documents, query_for_retrieval, correction_result = retrieval_orchestrator.search_documents(
             raw_query=user_query,
             top_k=5,
         )
-        if not top_k_document:
+        if not keyword_documents and not semantic_documents:
             return ChatResponse(answer="I couldn't find relevant content for that query in the indexed documents.")
 
         answer_lines: List[str] = []
@@ -176,10 +179,17 @@ def chat(req: ChatRequest):
                 f"(tokens corrected: {correction_result.num_tokens_corrected})"
             )
             answer_lines.append("")
-
-        for rank, document in enumerate(top_k_document, start=1):
-            snippet = _extract_snippet(document.page_content, query_for_retrieval)
-            answer_lines.append(f"{rank}) {snippet}")
+        if keyword_documents:
+            answer_lines.append("Keyword Search Results:")
+            for rank, document in enumerate(keyword_documents, start=1):
+                snippet = _extract_snippet(document.page_content, query_for_retrieval)
+                answer_lines.append(f"{rank}) {snippet}")
+        if semantic_documents:
+            answer_lines.append("")
+            answer_lines.append("Semantic Search Results")
+            for rank, document in enumerate(semantic_documents, start=1):
+                snippet = _extract_snippet(document.page_content, query_for_retrieval)
+                answer_lines.append(f"{rank}) {snippet}")
 
         return ChatResponse(answer="\n".join(answer_lines))
 

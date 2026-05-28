@@ -59,7 +59,7 @@ def ingestion_handler(event, context):
     chunking_service = SemanticChunkingService(chunking_llm_model_id=indexing_settings.CHUNKING_MODEL_ID)
     chunk_store = S3GPChunkStore(bucket=shared_settings.S3_GP_BUCKET_NAME, chunks_prefix=shared_settings.S3_GP_CHUNK_PREFIX)
     embedding_service = EmbeddingService(embedding_model_id=shared_settings.EMBEDDING_MODEL_ID)
-    vector_store = S3VectorStore(bucket=indexing_settings.S3_VECTOR_BUCKET_NAME, vector_index=indexing_settings.S3_VECTOR_INDEX_NAME)
+    vector_store = S3VectorStore(bucket=shared_settings.S3_VECTOR_BUCKET_NAME, vector_index=shared_settings.S3_VECTOR_INDEX_NAME, read_only=False)
     corpus_change_table = CorpusChangeTable(table_name=shared_settings.DYNAMODB_CORPUS_CHANGE_TABLE_NAME)
     bm25_update_message_sender = BM25UpdateEventService(queue_url=indexing_settings.SQS_BM25_UPDATE_QUEUE_URL)
     domain_lexicon_writer = DomainLexiconWriter(

@@ -15,16 +15,31 @@ class VectorRecord:
     
 
 class S3VectorStore(BaseStore):
-    def __init__(self, bucket, vector_index):
+    def __init__(self, bucket: str, vector_index: str, read_only: bool):
         super().__init__(bucket, vectors=True)
         self.vector_index = vector_index
+        self.read_only = read_only
+
+        if read_only:
+            resp = self.s3.client.get_index(
+                vectorBucketName=bucket,
+                indexName=vector_index
+            )
+            self.vector_index_dim = resp.get("index").get("dimension")
+        else:
+            self.vector_index_dim = None
+
 
     def upload_vectors(
         self,
         vector_records_list: List[VectorRecord],
         vector_list_size_threshold: int, # Minimally above 100 for efficiency 
         batch_size_divisor: int,
-    ):
+    ):  
+        # Enforce instance permissions
+        if self.read_only:
+            raise PermissionError("This read-only S3VectorStore instance is not configured to upload vectors")
+
         if not vector_records_list:
             raise ValueError("vector_records_list cannot be empty")
 
@@ -89,6 +104,11 @@ class S3VectorStore(BaseStore):
         Returns:
             Summary metadata for deletion logging.
         """
+
+        # Enforce instance permissions
+        if self.read_only:
+            raise PermissionError("This read-only S3VectorStore instance is not configured to delete vectors")
+        
         self.s3.client.delete_vectors(
             vectorBucketName=self.bucket,
             indexName=self.vector_index,
@@ -99,3 +119,29 @@ class S3VectorStore(BaseStore):
             "vector_index": self.vector_index,
             "vector_keys": vector_keys_list
         }
+    
+
+    def query_vector_index(self, query_vector: List[float], top_k: int) -> List[str]:
+        """
+        Queries the vector index with an embedded query vector and returns the top k vector keys.
+        Only for use by read-only vector store instances during retrieval.
+        """
+
+        # Enforce instance permissions
+        if not self.read_only:
+            raise PermissionError("This write-only S3VectorStore instance is not configured to query vectors")
+
+        if len(query_vector) != self.vector_index_dim:
+            raise ValueError(f"Query vector dimension {len(query_vector)} does not match index dimension {self.vector_index_dim}")
+        
+        query_vector_response = self.s3.client.query_vectors(
+            vectorBucketName = self.bucket,
+            indexName = self.vector_index,
+            queryVector = { "float32" : query_vector },
+            topK = top_k
+        )
+        
+        # Extract keys of top k vectors in response (sorted nearest to furthest alr)
+        top_k_vectors = list(map(lambda vector: vector.get("key"), query_vector_response.get("vectors", [])))
+        return top_k_vectors
+

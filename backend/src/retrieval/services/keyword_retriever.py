@@ -18,7 +18,9 @@ class KeywordSearchService:
             self._retriever = None
 
     def ensure_index(self, docs: list[Document], corpus_version: str):
-        # corpus_version can be manifest etag, timestamp, or content hash
+        """
+        Helper function to rebuild the in-memory BM25 index when the corpus version changes.
+        """
         with self._lock:
             if self._corpus_version == corpus_version:
                 return
@@ -32,14 +34,25 @@ class KeywordSearchService:
             self._corpus_version = corpus_version
 
     def search(self, query: str, top_k: int = 10):
-        if self._retriever is None:
-            return []
+        """
+        Takes in a query as a string, runs BM25 keyword search over the in-memory
+        chunk document corpus, and returns the top k chunks in ranked order.
 
-        # Pull a wider candidate set, then re-rank by lexical overlap so short
-        # factual queries (e.g. "asian bmi threshold") prioritize exact matches.
-        candidate_k = max(top_k * 4, 20)
-        self._retriever.k = candidate_k
-        candidates = self._retriever.invoke(query)
+        Process flow:
+        1) Pulls a wider BM25 candidate set than requested top_k
+        2) Tokenizes the query and candidate chunk content
+        3) Re-ranks BM25 candidates by lexical overlap while preserving BM25 rank as tie-breaker
+        4) Returns the top k matching chunk Document objects
+        """
+        with self._lock:
+            if self._retriever is None:
+                return []
+
+            # Pull a wider candidate set, then re-rank by lexical overlap so short
+            # factual queries (e.g. "asian bmi threshold") prioritize exact matches.
+            candidate_k = max(top_k * 4, 20)
+            self._retriever.k = candidate_k
+            candidates = self._retriever.invoke(query)
 
         query_tokens = _tokenize(query)
         if not query_tokens:

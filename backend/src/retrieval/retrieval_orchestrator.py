@@ -2,6 +2,7 @@ import logging
 from pathlib import Path
 from threading import Event, Lock, Thread
 from typing import Any, Dict, List, Optional, Tuple
+from concurrent.futures import ThreadPoolExecutor
 
 from ..shared.services.chunk_index import InMemoryChunkIndex
 from ..indexing.services.indexed_documents_loader import load_indexed_documents
@@ -10,6 +11,7 @@ from ..indexing.services.manifest_repository import ManifestRepository
 from ..shared.services.s3_base_store import BaseStore
 from ..shared.services.s3_gp_chunk_store import S3GPChunkStore
 from .services.keyword_retriever import KeywordSearchService
+from .services.semantic_retriever import SemanticSearchService
 from .services.query_basic_normalizer import basic_query_normalize
 from .services.spell_correction.spell_correction_query_preprocessor import extract_for_spell_correction
 from .services.spell_correction.spell_corrector import SpellCorrector
@@ -27,13 +29,16 @@ class RetrievalOrchestrator:
             manifest_table_name: str, 
             s3_gp_bucket_name: str,
             chunks_prefix: str,
+            s3_vector_bucket_name: str,
+            s3_vector_index_name: str,
+            embedding_model_id: str,
             bm25_pointer_key: str = "bm25/pointer.json",
             bm25_snapshot_key: str = "bm25/snapshot.json",
             bm25_poll_interval_seconds: int = 5,
             enable_spell_correction: bool = False,
             collection_term_stats_table_name: Optional[str] = None,
             base_english_lexicon_path: Optional[str] = None,
-            chat_history: Optional[List[Dict[str, Any]]] = None,
+            chat_history: Optional[List[Dict[str, Any]]] = None
         ):
         self.corpus_change_table_name = corpus_change_table_name
         self.manifest_table = ManifestRepository(table_name=manifest_table_name)
@@ -59,6 +64,11 @@ class RetrievalOrchestrator:
 
         self.bm25_retriever = KeywordSearchService(
             chunks_list=list(self.chunk_index.documents_by_chunk_id.values())
+        )
+        self.semantic_retriever = SemanticSearchService(
+            bucket=s3_vector_bucket_name,
+            vector_index=s3_vector_index_name,
+            embedding_model_id=embedding_model_id
         )
 
         self._state_lock = Lock()
@@ -102,7 +112,7 @@ class RetrievalOrchestrator:
         """
         correction_result: Optional[QueryCorrectionResult] = None
         normalized_query = basic_query_normalize(raw_query)
-        query_for_retrieval = normalized_query
+        query_for_retrieval = normalized_query.raw_query
 
         if self.enable_spell_correction and self.spell_corrector:
             try:
@@ -113,9 +123,32 @@ class RetrievalOrchestrator:
                 logger.exception("Spell correction failed; falling back to original query")
 
         with self._state_lock:
-            ranked_documents = self.bm25_retriever.search(query_for_retrieval, top_k=top_k)
+            bm25_retriever = self.bm25_retriever
+            documents_by_chunk_id = self.chunk_index.documents_by_chunk_id
+            # ranked_documents = self.bm25_retriever.search(query_for_retrieval, top_k=top_k)
 
-        return ranked_documents, query_for_retrieval, correction_result
+        with ThreadPoolExecutor(max_workers=2) as retrieval_executor:
+            keyword_future = retrieval_executor.submit(
+                bm25_retriever.search,
+                query_for_retrieval,
+                top_k,
+            )
+            semantic_future = retrieval_executor.submit(
+                self.semantic_retriever.search,
+                query_for_retrieval,
+                top_k,
+                documents_by_chunk_id
+            )
+            try:
+                keyword_documents = keyword_future.result()
+            except Exception:
+                logger.exception("Keyword retrieval failed")
+            try:
+                semantic_documents = semantic_future.result()
+            except Exception:
+                logger.exception("Semantic retrieval failed")
+
+        return keyword_documents, semantic_documents, query_for_retrieval, correction_result
 
 
     def start_background_polling(self) -> None:
