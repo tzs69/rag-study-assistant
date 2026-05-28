@@ -18,7 +18,8 @@ class EmbeddingService:
         bedrock = BedrockClient(embedding_model_id)
         self.embedding_model = BedrockEmbeddings(
             client=bedrock.client,
-            model_id=bedrock.model_id
+            model_id=bedrock.model_id,
+            dimensions=512
         )
 
     def embed_chunks(self, chunks_list: List[Chunk]) -> List[VectorRecord]:
