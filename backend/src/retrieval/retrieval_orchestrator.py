@@ -32,6 +32,7 @@ class RetrievalOrchestrator:
             s3_vector_bucket_name: str,
             s3_vector_index_name: str,
             embedding_model_id: str,
+            min_cosine_threshold: float,
             bm25_pointer_key: str = "bm25/pointer.json",
             bm25_snapshot_key: str = "bm25/snapshot.json",
             bm25_poll_interval_seconds: int = 5,
@@ -68,7 +69,8 @@ class RetrievalOrchestrator:
         self.semantic_retriever = SemanticSearchService(
             bucket=s3_vector_bucket_name,
             vector_index=s3_vector_index_name,
-            embedding_model_id=embedding_model_id
+            embedding_model_id=embedding_model_id,
+            min_cosine_threshold=min_cosine_threshold
         )
 
         self._state_lock = Lock()
@@ -100,13 +102,14 @@ class RetrievalOrchestrator:
         self,
         raw_query: str,
         top_k: int = 5,
-    ) -> Tuple[List[Any], str, Optional[QueryCorrectionResult]]:
+    ) -> Tuple[List[Any], List[Any], str, Optional[QueryCorrectionResult]]:
         """
         Search BM25 documents with optional query spell correction.
 
         Returns:
-            Tuple[List[Any], str, Optional[QueryCorrectionResult]]:
-                - ranked documents
+            Tuple[List[Any], List[Any], str, Optional[QueryCorrectionResult]]:
+                - ranked keyword documents
+                - ranked semantic documents
                 - query actually used for retrieval
                 - correction metadata when spell correction ran
         """
@@ -128,6 +131,8 @@ class RetrievalOrchestrator:
             # ranked_documents = self.bm25_retriever.search(query_for_retrieval, top_k=top_k)
 
         with ThreadPoolExecutor(max_workers=2) as retrieval_executor:
+            keyword_documents = []
+            semantic_documents = []
             keyword_future = retrieval_executor.submit(
                 bm25_retriever.search,
                 query_for_retrieval,

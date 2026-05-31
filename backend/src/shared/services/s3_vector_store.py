@@ -1,7 +1,7 @@
 """
 Persistence service for writing document vectors into the configured S3 Vector bucket/index.
 """
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import asdict, dataclass
 
 from .s3_base_store import BaseStore
@@ -121,10 +121,17 @@ class S3VectorStore(BaseStore):
         }
     
 
-    def query_vector_index(self, query_vector: List[float], top_k: int) -> List[str]:
+    def query_vector_index(
+        self,
+        query_vector: List[float],
+        top_k: int,
+        min_cosine_threshold: float,
+    ) -> Tuple[Optional[str], List[Dict[str, Any]]]:
         """
-        Queries the vector index with an embedded query vector and returns the top k vector keys.
-        Only for use by read-only vector store instances during retrieval.
+        Queries the vector index with an embedded query vector and returns the top k 
+        (or less) vectors semantically related to the embedded query vector.
+        The index uses cosine distance; configured filtering uses cosine similarity.
+        Returns a list of vectors(dict) that pass the minimum cosine similarity threshold gate.
         """
 
         # Enforce instance permissions
@@ -133,15 +140,27 @@ class S3VectorStore(BaseStore):
 
         if len(query_vector) != self.vector_index_dim:
             raise ValueError(f"Query vector dimension {len(query_vector)} does not match index dimension {self.vector_index_dim}")
-        
+
         query_vector_response = self.s3.client.query_vectors(
             vectorBucketName = self.bucket,
             indexName = self.vector_index,
             queryVector = { "float32" : query_vector },
-            topK = top_k
+            topK = top_k,
+            returnDistance = True
         )
         
-        # Extract keys of top k vectors in response (sorted nearest to furthest alr)
-        top_k_vectors = list(map(lambda vector: vector.get("key"), query_vector_response.get("vectors", [])))
-        return top_k_vectors
+        # Verify correct distance metric used (cosine)
+        distance_metric = query_vector_response.get("distanceMetric")
+        if distance_metric != "cosine":
+            raise ValueError(f"Expected cosine distance metric, got {distance_metric}")
+
+        # Convert raw cosine distance to cosine similarity and apply filter
+        top_k_vectors = query_vector_response.get("vectors", [])
+        top_k_above_threshold = [
+            vector
+            for vector in top_k_vectors
+            if vector.get("distance") is not None
+            and 1 - vector["distance"] >= min_cosine_threshold
+        ]
+        return distance_metric, top_k_above_threshold
 

@@ -31,6 +31,7 @@ retrieval_orchestrator = RetrievalOrchestrator(
     s3_vector_bucket_name=shared_settings.S3_VECTOR_BUCKET_NAME,
     s3_vector_index_name=shared_settings.S3_VECTOR_INDEX_NAME,
     embedding_model_id=shared_settings.EMBEDDING_MODEL_ID,
+    min_cosine_threshold=retrieval_settings.MIN_COSINE_THRESHOLD,
     bm25_pointer_key=shared_settings.BM25_POINTER_KEY,
     bm25_snapshot_key=shared_settings.BM25_SNAPSHOT_KEY,
     bm25_poll_interval_seconds=retrieval_settings.BM25_POLL_INTERVAL_SECONDS,
@@ -184,12 +185,22 @@ def chat(req: ChatRequest):
             for rank, document in enumerate(keyword_documents, start=1):
                 snippet = _extract_snippet(document.page_content, query_for_retrieval)
                 answer_lines.append(f"{rank}) {snippet}")
+                answer_lines.append("")
         if semantic_documents:
             answer_lines.append("")
             answer_lines.append("Semantic Search Results")
             for rank, document in enumerate(semantic_documents, start=1):
                 snippet = _extract_snippet(document.page_content, query_for_retrieval)
+                metric = document.metadata.get("vector_distance_metric")
+                similarity = document.metadata.get("vector_similarity")
+                score_summary = (
+                    f"[similarity score ({metric}): {similarity:.4f}] "
+                    if metric is not None and similarity is not None
+                    else ""
+                )
                 answer_lines.append(f"{rank}) {snippet}")
+                answer_lines.append(score_summary)
+                answer_lines.append("")
 
         return ChatResponse(answer="\n".join(answer_lines))
 

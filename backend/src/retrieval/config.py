@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     # Feature flag for retrieval-time spell correction
     ENABLE_SPELL_CORRECTION: bool = False
 
+    # Minimum cosine similarity score threshold for semantic search candidate filtering
+    MIN_COSINE_THRESHOLD: float = None
+
     BASE_ENGLISH_LEXICON_PATH: str = "src/retrieval/data/base_english_lexicon.json"
     model_config = ConfigDict(
         env_file_encoding="utf-8",
