@@ -190,7 +190,7 @@ def ingestion_handler(event, context):
 
             # Chunk extracted document text
             try:
-                chunks: List[Chunk] = chunking_service.build_semantic_chunks_from_doctext(doc_text)
+                chunks: List[Chunk] = chunking_service.build_chunks_from_doctext(doc_text)
                 if not chunks:
                     raise ValueError(f"Chunking produced no output for doc_id='{doc_id}'")
                 logger.info(json.dumps(
