@@ -17,6 +17,7 @@ from .services.spell_correction.spell_correction_query_preprocessor import extra
 from .services.spell_correction.spell_corrector import SpellCorrector
 from ..shared.services.latest_bm25_pointer_loader import load_latest_pointer
 from .retrieval_types import QueryCorrectionResult
+from .services.reciprocal_rank_fusion import rrf_combine
 
 logger = logging.getLogger(__name__)
 
@@ -98,25 +99,35 @@ class RetrievalOrchestrator:
         self.chat_history = chat_history
 
 
-    def search_documents(
+    def search(
         self,
         raw_query: str,
-        top_k: int = 5,
-    ) -> Tuple[List[Any], List[Any], str, Optional[QueryCorrectionResult]]:
+        top_k: int = 10,
+    ) -> Tuple[List[Any], str, Optional[QueryCorrectionResult]]:
         """
-        Search BM25 documents with optional query spell correction.
+        Run the full retrieval flow for a user query.
+
+        Process flow:
+        1) Normalize the raw query for retrieval and optional spell correction.
+        2) Apply spell correction when enabled; otherwise use the normalized raw query.
+        3) Take a thread-safe snapshot of the current BM25 retriever and chunk index.
+        4) Run keyword and semantic retrieval in parallel.
+        5) Isolate failures so one retrieval branch can still return results if the other fails.
+        6) Fuse keyword and semantic candidates with Reciprocal Rank Fusion (RRF).
 
         Returns:
-            Tuple[List[Any], List[Any], str, Optional[QueryCorrectionResult]]:
-                - ranked keyword documents
-                - ranked semantic documents
+            Tuple[List[Any], str, Optional[QueryCorrectionResult]]:
+                - RRF-ranked chunk results
                 - query actually used for retrieval
                 - correction metadata when spell correction ran
         """
         correction_result: Optional[QueryCorrectionResult] = None
+
+        # Step 1: normalize the raw query before any retrieval branch sees it.
         normalized_query = basic_query_normalize(raw_query)
         query_for_retrieval = normalized_query.raw_query
 
+        # Step 2: optionally replace the retrieval query with the spell-corrected form.
         if self.enable_spell_correction and self.spell_corrector:
             try:
                 normalized_spell_correction_query = extract_for_spell_correction(normalized_query)
@@ -125,14 +136,15 @@ class RetrievalOrchestrator:
             except Exception:
                 logger.exception("Spell correction failed; falling back to original query")
 
+        # Step 3: snapshot current retrieval state so concurrent refreshes cannot change it mid-search.
         with self._state_lock:
             bm25_retriever = self.bm25_retriever
             documents_by_chunk_id = self.chunk_index.documents_by_chunk_id
-            # ranked_documents = self.bm25_retriever.search(query_for_retrieval, top_k=top_k)
 
+        # Step 4: run keyword and semantic retrieval concurrently.
         with ThreadPoolExecutor(max_workers=2) as retrieval_executor:
-            keyword_documents = []
-            semantic_documents = []
+            keyword_chunks = []
+            semantic_chunks = []
             keyword_future = retrieval_executor.submit(
                 bm25_retriever.search,
                 query_for_retrieval,
@@ -144,16 +156,20 @@ class RetrievalOrchestrator:
                 top_k,
                 documents_by_chunk_id
             )
+            # Step 5: isolate branch failures and fall back to the other branch's results.
             try:
-                keyword_documents = keyword_future.result()
+                keyword_chunks = keyword_future.result()
             except Exception:
                 logger.exception("Keyword retrieval failed")
             try:
-                semantic_documents = semantic_future.result()
+                semantic_chunks = semantic_future.result()
             except Exception:
                 logger.exception("Semantic retrieval failed")
 
-        return keyword_documents, semantic_documents, query_for_retrieval, correction_result
+        # Step 6: combine branch rankings into one deduplicated RRF-ranked result list.
+        rrf_chunks = rrf_combine(keyword_results_list=keyword_chunks, vector_results_list=semantic_chunks)
+
+        return rrf_chunks, query_for_retrieval, correction_result
 
 
     def start_background_polling(self) -> None:

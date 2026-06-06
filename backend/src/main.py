@@ -160,47 +160,30 @@ def _extract_snippet(text: str, query: str, max_chars: int = 280) -> str:
 def chat(req: ChatRequest):
     try:
         user_query = req.message.strip()
-        # message_history = req.history.strip()
+
         if not user_query:
             raise HTTPException(status_code=400, detail="message is required")
 
-        # placeholder for now
-        # answer = f"{user_query} testing_123"
-        keyword_documents, semantic_documents, query_for_retrieval, correction_result = retrieval_orchestrator.search_documents(
+        rrf_chunks, query_for_retrieval, correction_result = retrieval_orchestrator.search(
             raw_query=user_query,
             top_k=5,
         )
-        if not keyword_documents and not semantic_documents:
-            return ChatResponse(answer="I couldn't find relevant content for that query in the indexed documents.")
-
         answer_lines: List[str] = []
+
+        if not rrf_chunks: 
+            return ChatResponse(answer="I couldn't find relevant content for that query in the indexed documents.")
+        
         if correction_result and correction_result.used_spell_correction:
             answer_lines.append(
                 f"Spell correction applied: {correction_result.original_query} -> {correction_result.corrected_query} "
                 f"(tokens corrected: {correction_result.num_tokens_corrected})"
             )
             answer_lines.append("")
-        if keyword_documents:
-            answer_lines.append("Keyword Search Results:")
-            for rank, document in enumerate(keyword_documents, start=1):
-                snippet = _extract_snippet(document.page_content, query_for_retrieval)
-                answer_lines.append(f"{rank}) {snippet}")
-                answer_lines.append("")
-        if semantic_documents:
+
+        for rank, (_, chunk_text) in enumerate(rrf_chunks, start=1):
+            snippet = _extract_snippet(chunk_text, query_for_retrieval)
+            answer_lines.append(f"{rank}) {snippet}")
             answer_lines.append("")
-            answer_lines.append("Semantic Search Results")
-            for rank, document in enumerate(semantic_documents, start=1):
-                snippet = _extract_snippet(document.page_content, query_for_retrieval)
-                metric = document.metadata.get("vector_distance_metric")
-                similarity = document.metadata.get("vector_similarity")
-                score_summary = (
-                    f"[similarity score ({metric}): {similarity:.4f}] "
-                    if metric is not None and similarity is not None
-                    else ""
-                )
-                answer_lines.append(f"{rank}) {snippet}")
-                answer_lines.append(score_summary)
-                answer_lines.append("")
 
         return ChatResponse(answer="\n".join(answer_lines))
 
