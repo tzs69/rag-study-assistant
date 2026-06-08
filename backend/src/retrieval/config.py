@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     MIN_COSINE_THRESHOLD: float = None
 
     BASE_ENGLISH_LEXICON_PATH: str = "src/retrieval/data/base_english_lexicon.json"
+
+    RERANKER_BASE_URL: str = "http://localhost:8080/"
+
     model_config = ConfigDict(
         env_file_encoding="utf-8",
         extra="ignore",

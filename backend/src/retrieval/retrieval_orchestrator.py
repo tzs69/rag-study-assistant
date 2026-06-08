@@ -1,8 +1,10 @@
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Event, Lock, Thread
 from typing import Any, Dict, List, Optional, Tuple
-from concurrent.futures import ThreadPoolExecutor
+
+from langchain_core.documents import Document
 
 from ..shared.services.chunk_index import InMemoryChunkIndex
 from ..indexing.services.indexed_documents_loader import load_indexed_documents
@@ -18,6 +20,7 @@ from .services.spell_correction.spell_corrector import SpellCorrector
 from ..shared.services.latest_bm25_pointer_loader import load_latest_pointer
 from .retrieval_types import QueryCorrectionResult
 from .services.reciprocal_rank_fusion import rrf_combine
+from .clients.reranker_client import RerankerClient
 
 logger = logging.getLogger(__name__)
 
@@ -25,9 +28,9 @@ logger = logging.getLogger(__name__)
 class RetrievalOrchestrator:
 
     def __init__(
-            self, 
-            corpus_change_table_name: str, 
-            manifest_table_name: str, 
+            self,
+            corpus_change_table_name: str,
+            manifest_table_name: str,
             s3_gp_bucket_name: str,
             chunks_prefix: str,
             s3_vector_bucket_name: str,
@@ -40,6 +43,7 @@ class RetrievalOrchestrator:
             enable_spell_correction: bool = False,
             collection_term_stats_table_name: Optional[str] = None,
             base_english_lexicon_path: Optional[str] = None,
+            reranker_base_url: str = "http://localhost:8080/",
             chat_history: Optional[List[Dict[str, Any]]] = None
         ):
         self.corpus_change_table_name = corpus_change_table_name
@@ -96,14 +100,18 @@ class RetrievalOrchestrator:
                     else None,
                 )
 
+        self.ce_reranker_client = RerankerClient(base_url=reranker_base_url)
+
         self.chat_history = chat_history
 
 
     def search(
         self,
         raw_query: str,
-        top_k: int = 10,
-    ) -> Tuple[List[Any], str, Optional[QueryCorrectionResult]]:
+        keyword_candidates_size: int = 30,
+        semantic_candidates_size: int = 30,
+        rrf_candidates_size: int = 20,
+    ) -> Tuple[List[Document], str, Optional[QueryCorrectionResult]]:
         """
         Run the full retrieval flow for a user query.
 
@@ -113,11 +121,13 @@ class RetrievalOrchestrator:
         3) Take a thread-safe snapshot of the current BM25 retriever and chunk index.
         4) Run keyword and semantic retrieval in parallel.
         5) Isolate failures so one retrieval branch can still return results if the other fails.
-        6) Fuse keyword and semantic candidates with Reciprocal Rank Fusion (RRF).
+        6) Fuse and de-duplicate keyword and semantic candidates with Reciprocal Rank Fusion (RRF).
+        7) Send RRF-filtered candidates to the cross-encoder reranker API on a best-effort basis.
+        8) Return final ranked chunks.
 
         Returns:
-            Tuple[List[Any], str, Optional[QueryCorrectionResult]]:
-                - RRF-ranked chunk results
+            Tuple[List[Document], str, Optional[QueryCorrectionResult]]:
+                - Cross-encoder reranked, or RRF-ranked chunks as fallback
                 - query actually used for retrieval
                 - correction metadata when spell correction ran
         """
@@ -132,7 +142,7 @@ class RetrievalOrchestrator:
             try:
                 normalized_spell_correction_query = extract_for_spell_correction(normalized_query)
                 correction_result = self.spell_corrector.spell_correct_extracted_query(normalized_spell_correction_query)
-                query_for_retrieval = correction_result.corrected_query # Overwrite normalized query with spell corrected query
+                query_for_retrieval = correction_result.corrected_query  # Overwrite with spell-corrected query.
             except Exception:
                 logger.exception("Spell correction failed; falling back to original query")
 
@@ -148,12 +158,12 @@ class RetrievalOrchestrator:
             keyword_future = retrieval_executor.submit(
                 bm25_retriever.search,
                 query_for_retrieval,
-                top_k,
+                keyword_candidates_size,
             )
             semantic_future = retrieval_executor.submit(
                 self.semantic_retriever.search,
                 query_for_retrieval,
-                top_k,
+                semantic_candidates_size,
                 documents_by_chunk_id
             )
             # Step 5: isolate branch failures and fall back to the other branch's results.
@@ -167,9 +177,27 @@ class RetrievalOrchestrator:
                 logger.exception("Semantic retrieval failed")
 
         # Step 6: combine branch rankings into one deduplicated RRF-ranked result list.
-        rrf_chunks = rrf_combine(keyword_results_list=keyword_chunks, vector_results_list=semantic_chunks)
+        rrf_chunks = rrf_combine(
+            keyword_results_list=keyword_chunks,
+            vector_results_list=semantic_chunks,
+            top_k=rrf_candidates_size
+        )
+        final_ranked_chunks = rrf_chunks
 
-        return rrf_chunks, query_for_retrieval, correction_result
+        # Step 7: best-effort post to cross-encoder API to rerank RRF-filtered chunks.
+        reranker_status_ok = self.ce_reranker_client.status_ok()
+        if reranker_status_ok:
+            try:
+                ce_reranked_chunks = self.ce_reranker_client.rerank(
+                    query=query_for_retrieval,
+                    docs_to_rerank=rrf_chunks
+                )
+                final_ranked_chunks = ce_reranked_chunks
+            except Exception:
+                logger.exception("Cross-encoder reranking failed; using RRF chunks as fallback")
+
+        # Step 8: return final ranked chunks.
+        return final_ranked_chunks, query_for_retrieval, correction_result
 
 
     def start_background_polling(self) -> None:

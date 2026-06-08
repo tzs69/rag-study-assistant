@@ -26,6 +26,7 @@ Implemented:
 - Backend upload/list/delete/chat endpoints in `backend/src/main.py`
 - S3 raw document storage with original filename metadata
 - Event-driven indexing/deletion architecture and worker code under `backend/src/indexing`
+- Hybrid retrieval flow with BM25 keyword search, S3 Vector semantic search, RRF fusion, and best-effort cross-encoder reranking
 
 In progress / partial:
 - Better UX around ingestion lifecycle states (for example: disable delete while ingesting)
@@ -50,10 +51,13 @@ Planned next:
 - FastAPI
 - Pydantic + pydantic-settings
 - python-multipart
+- httpx
 
 ### Retrieval / Indexing
 - LangChain ecosystem (`langchain-aws`, `langchain-experimental`, `langchain_community`)
 - `rank_bm25` (keyword retrieval)
+- Reciprocal Rank Fusion (hybrid keyword/vector candidate fusion)
+- `sentence-transformers` CrossEncoder reranker service
 - `pypdf`, `python-docx` (document text extraction)
 
 ### Infrastructure / Cloud
@@ -72,6 +76,8 @@ Planned next:
 3. Backend stores raw docs in S3.
 4. S3 events trigger ingestion/deletion workers (via SQS) for downstream indexing lifecycle.
 5. Frontend fetches document list via `/api/documents`.
+6. Chat requests call backend `/chat`, which runs BM25 and semantic retrieval in parallel.
+7. Retrieval candidates are deduplicated/fused with RRF, then optionally reranked by the cross-encoder service.
 
 ## Indexing Demo
 
@@ -110,6 +116,19 @@ Set frontend env so proxy routes can reach backend:
 BACKEND_URL=http://127.0.0.1:8000
 ```
 
+### Run reranker service
+The retrieval orchestrator can call a separate cross-encoder reranker app. Example from repo root:
+
+```bash
+uvicorn backend.src.ce_rerank.main:app --reload --port 8080
+```
+
+The reranker service exposes:
+- `GET /health`
+- `POST /rerank`
+
+First startup may download the configured Hugging Face model.
+
 ## API Proxy Routes (Frontend)
 
 - `POST /api/upload` -> backend `/upload`
@@ -121,7 +140,7 @@ BACKEND_URL=http://127.0.0.1:8000
 
 For deeper implementation details, see:
 - Backend indexing lifecycle notes: [`backend/src/indexing/README.md`](backend/src/indexing/README.md)
-- Retrieval service implementation: `backend/src/retrieval/` (services and orchestrator)
+- Backend retrieval lifecycle notes: [`backend/src/retrieval/README.md`](backend/src/retrieval/README.md)
 - Infrastructure/SAM details: [`infra/README.md`](infra/README.md)
 
 This root README is intentionally product-level and cross-cutting; nested READMEs hold subsystem specifics.

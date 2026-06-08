@@ -9,3 +9,5 @@ langchain-text-splitters
 langchain-aws
 rank_bm25
 nltk
+httpx
+sentence-transformers

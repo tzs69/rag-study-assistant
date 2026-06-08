@@ -2,12 +2,10 @@
 import logging
 import re
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
-
-from pydantic import BaseModel
-from fastapi import FastAPI, UploadFile, File
-from fastapi import HTTPException
 from typing import List, Literal, Optional
+
+from fastapi import FastAPI, UploadFile, File, HTTPException
+from pydantic import BaseModel
 from .indexing.services.manifest_repository import ManifestRepository
 from .indexing.services.s3_gp_raw_document_store import S3GPRawDocumentStore
 from .retrieval.retrieval_orchestrator import RetrievalOrchestrator
@@ -38,6 +36,7 @@ retrieval_orchestrator = RetrievalOrchestrator(
     enable_spell_correction=retrieval_settings.ENABLE_SPELL_CORRECTION,
     collection_term_stats_table_name=shared_settings.DYNAMODB_COLLECTION_TERM_STATS_TABLE_NAME,
     base_english_lexicon_path=retrieval_settings.BASE_ENGLISH_LEXICON_PATH,
+    reranker_base_url=retrieval_settings.RERANKER_BASE_URL
 )
 
 
@@ -64,7 +63,7 @@ async def upload(files: list[UploadFile] = File(...)):
     try:
         result = await raw_doc_store.upload_docs_async(files)
         return {
-            "ok": True, 
+            "ok": True,
             "files": result
         }
     except ValueError as e:
@@ -103,12 +102,12 @@ def delete(doc_id: str):
         status = manifest_repository.fetch_status_by_doc_ids(doc_ids=[doc_id]).get(doc_id)
         if status != "indexed":
             raise HTTPException(status_code=409, detail=f"Document cannot be deleted while status is {status}")
-        
+
         raw_doc_store.delete_raw_doc(doc_id)
 
         return {
-            "ok": True, 
-            "docId": doc_id, 
+            "ok": True,
+            "docId": doc_id,
             "deleted": True
         }
     except HTTPException:
@@ -164,15 +163,17 @@ def chat(req: ChatRequest):
         if not user_query:
             raise HTTPException(status_code=400, detail="message is required")
 
-        rrf_chunks, query_for_retrieval, correction_result = retrieval_orchestrator.search(
+        ranked_chunks, query_for_retrieval, correction_result = retrieval_orchestrator.search(
             raw_query=user_query,
-            top_k=5,
+            keyword_candidates_size=30,
+            semantic_candidates_size=30,
+            rrf_candidates_size=20
         )
         answer_lines: List[str] = []
 
-        if not rrf_chunks: 
+        if not ranked_chunks:
             return ChatResponse(answer="I couldn't find relevant content for that query in the indexed documents.")
-        
+
         if correction_result and correction_result.used_spell_correction:
             answer_lines.append(
                 f"Spell correction applied: {correction_result.original_query} -> {correction_result.corrected_query} "
@@ -180,9 +181,28 @@ def chat(req: ChatRequest):
             )
             answer_lines.append("")
 
-        for rank, (_, chunk_text) in enumerate(rrf_chunks, start=1):
-            snippet = _extract_snippet(chunk_text, query_for_retrieval)
+        for rank, document in enumerate(ranked_chunks, start=1):
+            snippet = _extract_snippet(document.page_content, query_for_retrieval)
             answer_lines.append(f"{rank}) {snippet}")
+
+            metadata = document.metadata
+            rerank_score = metadata.get("rerank_score")
+            vector_rank = metadata.get("vector_cosine_rank")
+            keyword_rank = metadata.get("bm25_rank")
+
+            score_metrics = ""
+            if rerank_score is not None:
+                score_metrics += f"Rerank Score: {round(rerank_score, 5)}"
+            if vector_rank:
+                if score_metrics:
+                    score_metrics += ",  "
+                score_metrics += f"Vector Cosine Similarity Search Ranking: {vector_rank}"
+            if keyword_rank:
+                if score_metrics:
+                    score_metrics += ",  "
+                score_metrics += f"Keyword Search Ranking: {keyword_rank}"
+
+            answer_lines.append(f"[{score_metrics}]")
             answer_lines.append("")
 
         return ChatResponse(answer="\n".join(answer_lines))
