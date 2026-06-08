@@ -12,8 +12,8 @@ from ..indexing.services.latest_chunk_index_loader import load_chunk_index_from_
 from ..indexing.services.manifest_repository import ManifestRepository
 from ..shared.services.s3_base_store import BaseStore
 from ..shared.services.s3_gp_chunk_store import S3GPChunkStore
-from .services.keyword_retriever import KeywordSearchService
-from .services.semantic_retriever import SemanticSearchService
+from .services.keyword_retriever import KeywordRetrievalService
+from .services.semantic_retriever import SemanticRetrievalService
 from .services.query_basic_normalizer import basic_query_normalize
 from .services.spell_correction.spell_correction_query_preprocessor import extract_for_spell_correction
 from .services.spell_correction.spell_corrector import SpellCorrector
@@ -68,10 +68,10 @@ class RetrievalOrchestrator:
             doc_chunk_index=doc_chunk_index,
         )
 
-        self.bm25_retriever = KeywordSearchService(
+        self.bm25_retriever = KeywordRetrievalService(
             chunks_list=list(self.chunk_index.documents_by_chunk_id.values())
         )
-        self.semantic_retriever = SemanticSearchService(
+        self.semantic_retriever = SemanticRetrievalService(
             bucket=s3_vector_bucket_name,
             vector_index=s3_vector_index_name,
             embedding_model_id=embedding_model_id,
@@ -108,8 +108,8 @@ class RetrievalOrchestrator:
     def search(
         self,
         raw_query: str,
-        keyword_candidates_size: int = 30,
-        semantic_candidates_size: int = 30,
+        keyword_retrieval_candidates_size: int = 30,
+        semantic_retrieval_candidates_size: int = 30,
         rrf_candidates_size: int = 20,
     ) -> Tuple[List[Document], str, Optional[QueryCorrectionResult]]:
         """
@@ -119,15 +119,15 @@ class RetrievalOrchestrator:
         1) Normalize the raw query for retrieval and optional spell correction.
         2) Apply spell correction when enabled; otherwise use the normalized raw query.
         3) Take a thread-safe snapshot of the current BM25 retriever and chunk index.
-        4) Run keyword and semantic retrieval in parallel.
+        4) Run keyword retrieval (BM25) and semantic retrieval (vector cosine similarity) in parallel.
         5) Isolate failures so one retrieval branch can still return results if the other fails.
-        6) Fuse and de-duplicate keyword and semantic candidates with Reciprocal Rank Fusion (RRF).
+        6) Fuse and de-duplicate keyword retrieval and semantic retrieval results with Reciprocal Rank Fusion (RRF).
         7) Send RRF-filtered candidates to the cross-encoder reranker API on a best-effort basis.
-        8) Return final ranked chunks.
+        8) Return final ranked results.
 
         Returns:
             Tuple[List[Document], str, Optional[QueryCorrectionResult]]:
-                - Cross-encoder reranked, or RRF-ranked chunks as fallback
+                - Cross-encoder reranked, or RRF-ranked results as fallback
                 - query actually used for retrieval
                 - correction metadata when spell correction ran
         """
@@ -151,53 +151,53 @@ class RetrievalOrchestrator:
             bm25_retriever = self.bm25_retriever
             documents_by_chunk_id = self.chunk_index.documents_by_chunk_id
 
-        # Step 4: run keyword and semantic retrieval concurrently.
+        # Step 4: run BM25 and vector cosine similarity search concurrently.
         with ThreadPoolExecutor(max_workers=2) as retrieval_executor:
-            keyword_chunks = []
-            semantic_chunks = []
-            keyword_future = retrieval_executor.submit(
+            keyword_retrieval_results = []
+            semantic_retrieval_results = []
+            keyword_retrieval_future = retrieval_executor.submit(
                 bm25_retriever.search,
                 query_for_retrieval,
-                keyword_candidates_size,
+                keyword_retrieval_candidates_size,
             )
-            semantic_future = retrieval_executor.submit(
+            semantic_retrieval_future = retrieval_executor.submit(
                 self.semantic_retriever.search,
                 query_for_retrieval,
-                semantic_candidates_size,
+                semantic_retrieval_candidates_size,
                 documents_by_chunk_id
             )
             # Step 5: isolate branch failures and fall back to the other branch's results.
             try:
-                keyword_chunks = keyword_future.result()
+                keyword_retrieval_results = keyword_retrieval_future.result()
             except Exception:
-                logger.exception("Keyword retrieval failed")
+                logger.exception("BM25 keyword search failed")
             try:
-                semantic_chunks = semantic_future.result()
+                semantic_retrieval_results = semantic_retrieval_future.result()
             except Exception:
-                logger.exception("Semantic retrieval failed")
+                logger.exception("Vector cosine similarity search failed")
 
         # Step 6: combine branch rankings into one deduplicated RRF-ranked result list.
-        rrf_chunks = rrf_combine(
-            keyword_results_list=keyword_chunks,
-            vector_results_list=semantic_chunks,
+        rrf_results = rrf_combine(
+            keyword_retrieval_results_list=keyword_retrieval_results,
+            semantic_retrieval_results_list=semantic_retrieval_results,
             top_k=rrf_candidates_size
         )
-        final_ranked_chunks = rrf_chunks
+        final_ranked_results = rrf_results
 
-        # Step 7: best-effort post to cross-encoder API to rerank RRF-filtered chunks.
+        # Step 7: best-effort post to cross-encoder API to rerank RRF-filtered results.
         reranker_status_ok = self.ce_reranker_client.status_ok()
         if reranker_status_ok:
             try:
-                ce_reranked_chunks = self.ce_reranker_client.rerank(
+                ce_reranked_results = self.ce_reranker_client.rerank(
                     query=query_for_retrieval,
-                    docs_to_rerank=rrf_chunks
+                    docs_to_rerank=rrf_results
                 )
-                final_ranked_chunks = ce_reranked_chunks
+                final_ranked_results = ce_reranked_results
             except Exception:
-                logger.exception("Cross-encoder reranking failed; using RRF chunks as fallback")
+                logger.exception("Cross-encoder reranking failed; using RRF results as fallback")
 
-        # Step 8: return final ranked chunks.
-        return final_ranked_chunks, query_for_retrieval, correction_result
+        # Step 8: return final ranked results.
+        return final_ranked_results, query_for_retrieval, correction_result
 
 
     def start_background_polling(self) -> None:
@@ -266,7 +266,7 @@ class RetrievalOrchestrator:
         if chunk_index is None:
             return False
 
-        bm25_retriever = KeywordSearchService(
+        bm25_retriever = KeywordRetrievalService(
             chunks_list=list(chunk_index.documents_by_chunk_id.values())
         )
 

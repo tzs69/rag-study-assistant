@@ -6,7 +6,7 @@ from ...shared.clients.bedrock_client import BedrockClient
 from ...shared.services.s3_vector_store import S3VectorStore
 
 
-class SemanticSearchService:
+class SemanticRetrievalService:
     def __init__(self, bucket: str, vector_index: str, embedding_model_id: str, min_cosine_threshold: float = 0.60):
         bedrock = BedrockClient(embedding_model_id)
         self.embedding_model = BedrockEmbeddings(

@@ -5,7 +5,7 @@ from langchain_community.retrievers import BM25Retriever
 from langchain_core.documents import Document
 
 
-class KeywordSearchService:
+class KeywordRetrievalService:
     def __init__(self, chunks_list: List[Document], retriever: Optional[BM25Retriever] = None):
         self._lock = Lock()
         self._corpus_version: Optional[str] = None

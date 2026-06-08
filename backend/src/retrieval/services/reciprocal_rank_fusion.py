@@ -3,13 +3,13 @@ from langchain_core.documents import Document
 
 
 def rrf_combine(
-    keyword_results_list: List[Document],
-    vector_results_list: List[Document],
+    keyword_retrieval_results_list: List[Document],
+    semantic_retrieval_results_list: List[Document],
     top_k: int,
     c: int = 60
 ) -> List[Document]:
     """
-    Fuse keyword and vector search result lists using Reciprocal Rank Fusion (RRF).
+    Fuse keyword retrieval and semantic retrieval result lists using Reciprocal Rank Fusion (RRF).
 
     Process flow:
      1 - Walk through both ranked result lists in parallel by rank position.
@@ -21,18 +21,18 @@ def rrf_combine(
      7 - Return the fused Document objects in final ranked order.
 
     Order of tie-breaking (priority) is as follows:
-     - Chunk appears in: BOTH result lists > ONLY vector search results list > ONLY keyword search results list
+     - Chunk appears in: BOTH result lists > ONLY semantic retrieval results list > ONLY keyword retrieval results list
     """
 
-    index = max(len(keyword_results_list), len(vector_results_list))
+    index = max(len(keyword_retrieval_results_list), len(semantic_retrieval_results_list))
     chunk_tracker: Dict[str, Dict[str, Any]] = dict()
 
     # Step 1: walk both result lists
     for i in range(index):
 
-        # Keyword search results list
-        if i <= len(keyword_results_list)-1:
-            l1_chunk = keyword_results_list[i]
+        # Keyword retrieval results list
+        if i <= len(keyword_retrieval_results_list)-1:
+            l1_chunk = keyword_retrieval_results_list[i]
             l1_chunk_id = l1_chunk.id
 
             # Step 2: compute RRF contribution
@@ -47,11 +47,11 @@ def rrf_combine(
             else:
                 chunk_tracker[l1_chunk_id]["rrf_score"] += rrf_score
                 chunk_tracker[l1_chunk_id]["priority"] = 2
-            chunk_tracker[l1_chunk_id]["bm25_rank"] = i + 1
+            chunk_tracker[l1_chunk_id]["keyword_retrieval_rank"] = i + 1
 
-        # Vector search results list
-        if i <= len(vector_results_list)-1:
-            l2_chunk = vector_results_list[i]
+        # Semantic retrieval results list
+        if i <= len(semantic_retrieval_results_list)-1:
+            l2_chunk = semantic_retrieval_results_list[i]
             l2_chunk_id = l2_chunk.id
 
             # Step 2: compute RRF contribution
@@ -66,7 +66,7 @@ def rrf_combine(
             else:
                 chunk_tracker[l2_chunk_id]["rrf_score"] += rrf_score
                 chunk_tracker[l2_chunk_id]["priority"] = 2
-            chunk_tracker[l2_chunk_id]["vector_cosine_similarity_rank"] = i + 1
+            chunk_tracker[l2_chunk_id]["semantic_retrieval_rank"] = i + 1
 
     out: List[Tuple[Document, float, int]] = []
 
@@ -75,13 +75,13 @@ def rrf_combine(
 
         chunk_text, rrf_score, priority = metadata["text"], metadata["rrf_score"], metadata["priority"]
 
-        chunk_bm25_rank, chunk_vector_rank = metadata.get("bm25_rank"), metadata.get("vector_cosine_similarity_rank")
+        keyword_retrieval_rank, semantic_retrieval_rank = metadata.get("keyword_retrieval_rank"), metadata.get("semantic_retrieval_rank")
 
         chunk_metadata = {}
-        if chunk_bm25_rank is not None:
-            chunk_metadata["bm25_rank"] = chunk_bm25_rank
-        if chunk_vector_rank is not None:
-            chunk_metadata["vector_cosine_rank"] = chunk_vector_rank
+        if keyword_retrieval_rank is not None:
+            chunk_metadata["keyword_retrieval_rank"] = keyword_retrieval_rank
+        if semantic_retrieval_rank is not None:
+            chunk_metadata["semantic_retrieval_rank"] = semantic_retrieval_rank
 
         chunk_doc = Document(
             id=chunk_id,

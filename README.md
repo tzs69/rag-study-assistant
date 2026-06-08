@@ -17,26 +17,31 @@ This repository contains:
 
 ## Current Status
 
-Implemented:
+### Implemented
 - Frontend Knowledge Base flow:
-  - list documents
+  - list documents with indexing status
   - upload documents
-  - delete documents
-- Next API proxy routes under `src/app/api/**` for backend communication
+  - delete indexed documents
+- Frontend Chat page and Next API proxy routes under `src/app/api/**` for backend communication
 - Backend upload/list/delete/chat endpoints in `backend/src/main.py`
+- Backend document listing with per-document indexing status
+- Backend delete guard that blocks deletion until a document is indexed
 - S3 raw document storage with original filename metadata
 - Event-driven indexing/deletion architecture and worker code under `backend/src/indexing`
-- Hybrid retrieval flow with BM25 keyword search, S3 Vector semantic search, RRF fusion, and best-effort cross-encoder reranking
+- Chunking, embedding, chunk artifact storage, vector upsert/delete, and manifest lifecycle handling
+- Domain lexicon tracking for retrieval-time spell correction support
+- Corpus change tracking plus BM25 snapshot/pointer update pipeline
+- Hybrid retrieval flow with keyword retrieval (BM25), semantic retrieval (S3 Vector cosine similarity), RRF fusion, and best-effort cross-encoder reranking
+- Separate FastAPI cross-encoder reranker service under `backend/src/ce_rerank`
 
-In progress / partial:
-- Better UX around ingestion lifecycle states (for example: disable delete while ingesting)
-- More consistent error surfacing and logging strategy across UI + API route layers
+### In Progress / Partial:
+- `/chat` currently returns retrieved/reranked chunk inspection output, not final LLM answer synthesis
+- Error handling and logging are functional but still rudimentary and not yet standardized across UI, API, indexing, and retrieval paths
 
-Planned next:
-- Surface ingestion status on the Knowledge Base page
-- Add document-level status transitions (`ingesting`, `indexed`, `failed`) to UI
-- Harden API contracts and shared types between frontend/backend
-- Improve observability and test coverage (route contracts + end-to-end flows)
+### Planned Next
+- Implement LLM answer generation over retrieved/reranked chunks
+- Improve observability and test coverage across indexing, retrieval, route contracts, and chat generation
+- Add source-aware answer formatting for generated responses
 
 ## Tech Stack
 
@@ -55,8 +60,8 @@ Planned next:
 
 ### Retrieval / Indexing
 - LangChain ecosystem (`langchain-aws`, `langchain-experimental`, `langchain_community`)
-- `rank_bm25` (keyword retrieval)
-- Reciprocal Rank Fusion (hybrid keyword/vector candidate fusion)
+- `rank_bm25` (keyword retrieval / BM25)
+- Reciprocal Rank Fusion (hybrid keyword/semantic retrieval fusion)
 - `sentence-transformers` CrossEncoder reranker service
 - `pypdf`, `python-docx` (document text extraction)
 
@@ -76,7 +81,7 @@ Planned next:
 3. Backend stores raw docs in S3.
 4. S3 events trigger ingestion/deletion workers (via SQS) for downstream indexing lifecycle.
 5. Frontend fetches document list via `/api/documents`.
-6. Chat requests call backend `/chat`, which runs BM25 and semantic retrieval in parallel.
+6. Chat requests call backend `/chat`, which runs keyword retrieval (BM25) and semantic retrieval in parallel.
 7. Retrieval candidates are deduplicated/fused with RRF, then optionally reranked by the cross-encoder service.
 
 ## Indexing Demo

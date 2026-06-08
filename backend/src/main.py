@@ -165,8 +165,8 @@ def chat(req: ChatRequest):
 
         ranked_chunks, query_for_retrieval, correction_result = retrieval_orchestrator.search(
             raw_query=user_query,
-            keyword_candidates_size=30,
-            semantic_candidates_size=30,
+            keyword_retrieval_candidates_size=30,
+            semantic_retrieval_candidates_size=30,
             rrf_candidates_size=20
         )
         answer_lines: List[str] = []
@@ -187,20 +187,20 @@ def chat(req: ChatRequest):
 
             metadata = document.metadata
             rerank_score = metadata.get("rerank_score")
-            vector_rank = metadata.get("vector_cosine_rank")
-            keyword_rank = metadata.get("bm25_rank")
+            keyword_retrieval_rank = metadata.get("keyword_retrieval_rank")
+            semantic_retrieval_rank = metadata.get("semantic_retrieval_rank")
 
             score_metrics = ""
             if rerank_score is not None:
                 score_metrics += f"Rerank Score: {round(rerank_score, 5)}"
-            if vector_rank:
+            if semantic_retrieval_rank:
                 if score_metrics:
                     score_metrics += ",  "
-                score_metrics += f"Vector Cosine Similarity Search Ranking: {vector_rank}"
-            if keyword_rank:
+                score_metrics += f"Semantic Retrieval (Vector Cosine Similarity) Ranking: {semantic_retrieval_rank}"
+            if keyword_retrieval_rank:
                 if score_metrics:
                     score_metrics += ",  "
-                score_metrics += f"Keyword Search Ranking: {keyword_rank}"
+                score_metrics += f"Keyword Retrieval (BM25) Ranking: {keyword_retrieval_rank}"
 
             answer_lines.append(f"[{score_metrics}]")
             answer_lines.append("")

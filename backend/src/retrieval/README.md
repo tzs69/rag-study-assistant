@@ -1,18 +1,19 @@
 # Retrieval Pipeline - Backend Notes
 
-This document describes the current retrieval architecture under `backend/src/retrieval`, including hybrid keyword/vector candidate retrieval, Reciprocal Rank Fusion (RRF), and best-effort cross-encoder reranking.
+This document describes the current retrieval architecture under `backend/src/retrieval`, including hybrid keyword/semantic candidate retrieval, Reciprocal Rank Fusion (RRF), and best-effort cross-encoder reranking.
 
 ## Scope
 
 - Folder scope: `backend/src/retrieval`
 - App purpose: Retrieve relevant indexed chunks for `/chat` requests before answer generation.
 - Current status:
-  - BM25 keyword retrieval is implemented with an in-memory LangChain BM25 retriever.
+  - Keyword retrieval is implemented with an in-memory LangChain BM25 retriever.
   - Semantic retrieval is implemented against S3 Vectors using Bedrock query embeddings.
   - Keyword and semantic retrieval branches run in parallel.
   - Retrieval branch failures are isolated so one failed branch does not fail the whole request.
-  - RRF fusion deduplicates keyword/vector candidates into one ranked `Document` list.
+  - RRF deduplicates keyword/semantic retrieval results into a single ranked `Document` result list.
   - Cross-encoder reranking is implemented as a best-effort post-RRF step through a separate FastAPI app.
+    - Separation due to Cross-Encoder's heavy import dependencies at application start-up time
 
 ## Current Runtime Flow
 
@@ -20,7 +21,7 @@ This document describes the current retrieval architecture under `backend/src/re
 2. The orchestrator normalizes the query.
 3. Optional spell correction rewrites the retrieval query when enabled.
 4. The orchestrator snapshots the current BM25 retriever and chunk index under lock.
-5. BM25 keyword retrieval and semantic vector retrieval run concurrently.
+5. Keyword retrieval (BM25) and semantic retrieval (vector cosine similarity) run concurrently.
 6. Each branch returns a ranked `List[Document]`; failed branches log and fall back to an empty list.
 7. `rrf_combine` deduplicates by `chunk_id`, computes RRF scores, and returns the top fused candidates.
 8. If the reranker service is healthy, the orchestrator sends RRF candidates to the cross-encoder reranker.
@@ -36,14 +37,14 @@ This document describes the current retrieval architecture under `backend/src/re
 - Coordinates query normalization, optional spell correction, keyword retrieval, semantic retrieval, RRF, and reranking.
 - Starts a background BM25 pointer poller on FastAPI lifespan startup.
 
-### `KeywordSearchService`
+### `KeywordRetrievalService`
 
 - File: `backend/src/retrieval/services/keyword_retriever.py`
 - Uses LangChain's BM25 retriever over the in-memory chunk corpus.
 - Returns `List[Document]` in ranked order.
 - Uses a lock around BM25 search because the underlying retriever `k` value is mutated per search.
 
-### `SemanticSearchService`
+### `SemanticRetrievalService`
 
 - File: `backend/src/retrieval/services/semantic_retriever.py`
 - Embeds the query with the same Bedrock embedding model used during indexing.
@@ -54,11 +55,11 @@ This document describes the current retrieval architecture under `backend/src/re
 ### `rrf_combine`
 
 - File: `backend/src/retrieval/services/reciprocal_rank_fusion.py`
-- Fuses keyword and vector ranked lists using `1 / (c + rank)`.
+- Fuses keyword and semantic retrieval ranked lists using `1 / (c + rank)`.
 - Deduplicates candidates by `Document.id` / chunk id.
 - Returns `Document` objects with source-rank metadata:
-  - `bm25_rank`
-  - `vector_cosine_rank`
+  - `keyword_retrieval_rank`
+  - `semantic_retrieval_rank`
 
 ### `RerankerClient`
 
