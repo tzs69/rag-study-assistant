@@ -206,8 +206,10 @@ Worker is implemented as a pure orchestrator with these substeps:
 - Keeps the mapping in memory for later domain-lexicon db upsert.
 
 5. Chunking
-- Apply token-aware chunking strategy with overlap.
-- Emit chunk-level metadata (`doc_id`, `chunk_id`, position offsets/pages).
+- Normalize text while preserving paragraph boundaries.
+- Create semantic primary chunks and merge undersized chunks into an adjacent neighbour.
+- Split oversized primary chunks with a recursive character splitter using overlap, then merge undersized sub-chunks.
+- Emit chunk-level metadata (`doc_id`, `chunk_id`).
 
 6. Embedding
 - Batch chunk texts to embedding model.

@@ -51,7 +51,7 @@ def deletion_handler(event, context):
     raw_doc_store = S3GPRawDocumentStore(bucket=shared_settings.S3_GP_BUCKET_NAME, raw_prefix=shared_settings.S3_GP_RAW_PREFIX)
     manifest_repository = ManifestRepository(table_name=indexing_settings.DYNAMODB_MANIFEST_TABLE_NAME)      
     chunk_store = S3GPChunkStore(bucket=shared_settings.S3_GP_BUCKET_NAME, chunks_prefix=shared_settings.S3_GP_CHUNK_PREFIX)
-    vector_store = S3VectorStore(bucket=indexing_settings.S3_VECTOR_BUCKET_NAME, vector_index=indexing_settings.S3_VECTOR_INDEX_NAME)
+    vector_store = S3VectorStore(bucket=shared_settings.S3_VECTOR_BUCKET_NAME, vector_index=shared_settings.S3_VECTOR_INDEX_NAME, read_only=False)
     corpus_change_table = CorpusChangeTable(table_name=shared_settings.DYNAMODB_CORPUS_CHANGE_TABLE_NAME)
     bm25_update_message_sender = BM25UpdateEventService(queue_url=indexing_settings.SQS_BM25_UPDATE_QUEUE_URL)
     domain_lexicon_writer = DomainLexiconWriter(

@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     S3_GP_RAW_PREFIX: Optional[str] = None
     S3_GP_CHUNK_PREFIX: Optional[str] = None
 
+    S3_VECTOR_BUCKET_NAME: Optional[str] = None
+    S3_VECTOR_INDEX_NAME: Optional[str] = None
+
     DYNAMODB_CORPUS_CHANGE_TABLE_NAME: Optional[str] = None
     DYNAMODB_COLLECTION_TERM_STATS_TABLE_NAME: Optional[str] = None
     DYNAMODB_DOC_TERM_STATS_TABLE_NAME: Optional[str] = None

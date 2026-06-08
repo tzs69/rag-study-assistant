@@ -2,12 +2,10 @@
 import logging
 import re
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
-
-from pydantic import BaseModel
-from fastapi import FastAPI, UploadFile, File
-from fastapi import HTTPException
 from typing import List, Literal, Optional
+
+from fastapi import FastAPI, UploadFile, File, HTTPException
+from pydantic import BaseModel
 from .indexing.services.manifest_repository import ManifestRepository
 from .indexing.services.s3_gp_raw_document_store import S3GPRawDocumentStore
 from .retrieval.retrieval_orchestrator import RetrievalOrchestrator
@@ -28,12 +26,17 @@ retrieval_orchestrator = RetrievalOrchestrator(
     corpus_change_table_name=shared_settings.DYNAMODB_CORPUS_CHANGE_TABLE_NAME,
     s3_gp_bucket_name=shared_settings.S3_GP_BUCKET_NAME,
     chunks_prefix=shared_settings.S3_GP_CHUNK_PREFIX,
+    s3_vector_bucket_name=shared_settings.S3_VECTOR_BUCKET_NAME,
+    s3_vector_index_name=shared_settings.S3_VECTOR_INDEX_NAME,
+    embedding_model_id=shared_settings.EMBEDDING_MODEL_ID,
+    min_cosine_threshold=retrieval_settings.MIN_COSINE_THRESHOLD,
     bm25_pointer_key=shared_settings.BM25_POINTER_KEY,
     bm25_snapshot_key=shared_settings.BM25_SNAPSHOT_KEY,
     bm25_poll_interval_seconds=retrieval_settings.BM25_POLL_INTERVAL_SECONDS,
     enable_spell_correction=retrieval_settings.ENABLE_SPELL_CORRECTION,
     collection_term_stats_table_name=shared_settings.DYNAMODB_COLLECTION_TERM_STATS_TABLE_NAME,
     base_english_lexicon_path=retrieval_settings.BASE_ENGLISH_LEXICON_PATH,
+    reranker_base_url=retrieval_settings.RERANKER_BASE_URL
 )
 
 
@@ -60,7 +63,7 @@ async def upload(files: list[UploadFile] = File(...)):
     try:
         result = await raw_doc_store.upload_docs_async(files)
         return {
-            "ok": True, 
+            "ok": True,
             "files": result
         }
     except ValueError as e:
@@ -99,12 +102,12 @@ def delete(doc_id: str):
         status = manifest_repository.fetch_status_by_doc_ids(doc_ids=[doc_id]).get(doc_id)
         if status != "indexed":
             raise HTTPException(status_code=409, detail=f"Document cannot be deleted while status is {status}")
-        
+
         raw_doc_store.delete_raw_doc(doc_id)
 
         return {
-            "ok": True, 
-            "docId": doc_id, 
+            "ok": True,
+            "docId": doc_id,
             "deleted": True
         }
     except HTTPException:
@@ -156,20 +159,21 @@ def _extract_snippet(text: str, query: str, max_chars: int = 280) -> str:
 def chat(req: ChatRequest):
     try:
         user_query = req.message.strip()
-        # message_history = req.history.strip()
+
         if not user_query:
             raise HTTPException(status_code=400, detail="message is required")
 
-        # placeholder for now
-        # answer = f"{user_query} testing_123"
-        top_k_document, query_for_retrieval, correction_result = retrieval_orchestrator.search_documents(
+        ranked_chunks, query_for_retrieval, correction_result = retrieval_orchestrator.search(
             raw_query=user_query,
-            top_k=5,
+            keyword_retrieval_candidates_size=30,
+            semantic_retrieval_candidates_size=30,
+            rrf_candidates_size=20
         )
-        if not top_k_document:
+        answer_lines: List[str] = []
+
+        if not ranked_chunks:
             return ChatResponse(answer="I couldn't find relevant content for that query in the indexed documents.")
 
-        answer_lines: List[str] = []
         if correction_result and correction_result.used_spell_correction:
             answer_lines.append(
                 f"Spell correction applied: {correction_result.original_query} -> {correction_result.corrected_query} "
@@ -177,9 +181,29 @@ def chat(req: ChatRequest):
             )
             answer_lines.append("")
 
-        for rank, document in enumerate(top_k_document, start=1):
+        for rank, document in enumerate(ranked_chunks, start=1):
             snippet = _extract_snippet(document.page_content, query_for_retrieval)
             answer_lines.append(f"{rank}) {snippet}")
+
+            metadata = document.metadata
+            rerank_score = metadata.get("rerank_score")
+            keyword_retrieval_rank = metadata.get("keyword_retrieval_rank")
+            semantic_retrieval_rank = metadata.get("semantic_retrieval_rank")
+
+            score_metrics = ""
+            if rerank_score is not None:
+                score_metrics += f"Rerank Score: {round(rerank_score, 5)}"
+            if semantic_retrieval_rank:
+                if score_metrics:
+                    score_metrics += ",  "
+                score_metrics += f"Semantic Retrieval (Vector Cosine Similarity) Ranking: {semantic_retrieval_rank}"
+            if keyword_retrieval_rank:
+                if score_metrics:
+                    score_metrics += ",  "
+                score_metrics += f"Keyword Retrieval (BM25) Ranking: {keyword_retrieval_rank}"
+
+            answer_lines.append(f"[{score_metrics}]")
+            answer_lines.append("")
 
         return ChatResponse(answer="\n".join(answer_lines))
 

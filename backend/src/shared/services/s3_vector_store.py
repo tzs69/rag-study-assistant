@@ -1,7 +1,7 @@
 """
 Persistence service for writing document vectors into the configured S3 Vector bucket/index.
 """
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import asdict, dataclass
 
 from .s3_base_store import BaseStore
@@ -15,16 +15,31 @@ class VectorRecord:
     
 
 class S3VectorStore(BaseStore):
-    def __init__(self, bucket, vector_index):
+    def __init__(self, bucket: str, vector_index: str, read_only: bool):
         super().__init__(bucket, vectors=True)
         self.vector_index = vector_index
+        self.read_only = read_only
+
+        if read_only:
+            resp = self.s3.client.get_index(
+                vectorBucketName=bucket,
+                indexName=vector_index
+            )
+            self.vector_index_dim = resp.get("index").get("dimension")
+        else:
+            self.vector_index_dim = None
+
 
     def upload_vectors(
         self,
         vector_records_list: List[VectorRecord],
         vector_list_size_threshold: int, # Minimally above 100 for efficiency 
         batch_size_divisor: int,
-    ):
+    ):  
+        # Enforce instance permissions
+        if self.read_only:
+            raise PermissionError("This read-only S3VectorStore instance is not configured to upload vectors")
+
         if not vector_records_list:
             raise ValueError("vector_records_list cannot be empty")
 
@@ -89,6 +104,11 @@ class S3VectorStore(BaseStore):
         Returns:
             Summary metadata for deletion logging.
         """
+
+        # Enforce instance permissions
+        if self.read_only:
+            raise PermissionError("This read-only S3VectorStore instance is not configured to delete vectors")
+        
         self.s3.client.delete_vectors(
             vectorBucketName=self.bucket,
             indexName=self.vector_index,
@@ -99,3 +119,48 @@ class S3VectorStore(BaseStore):
             "vector_index": self.vector_index,
             "vector_keys": vector_keys_list
         }
+    
+
+    def query_vector_index(
+        self,
+        query_vector: List[float],
+        top_k: int,
+        min_cosine_threshold: float,
+    ) -> Tuple[Optional[str], List[Dict[str, Any]]]:
+        """
+        Queries the vector index with an embedded query vector and returns the top k 
+        (or less) vectors semantically related to the embedded query vector.
+        The index uses cosine distance; configured filtering uses cosine similarity.
+        Returns a list of vectors(dict) that pass the minimum cosine similarity threshold gate.
+        """
+
+        # Enforce instance permissions
+        if not self.read_only:
+            raise PermissionError("This write-only S3VectorStore instance is not configured to query vectors")
+
+        if len(query_vector) != self.vector_index_dim:
+            raise ValueError(f"Query vector dimension {len(query_vector)} does not match index dimension {self.vector_index_dim}")
+
+        query_vector_response = self.s3.client.query_vectors(
+            vectorBucketName = self.bucket,
+            indexName = self.vector_index,
+            queryVector = { "float32" : query_vector },
+            topK = top_k,
+            returnDistance = True
+        )
+        
+        # Verify correct distance metric used (cosine)
+        distance_metric = query_vector_response.get("distanceMetric")
+        if distance_metric != "cosine":
+            raise ValueError(f"Expected cosine distance metric, got {distance_metric}")
+
+        # Convert raw cosine distance to cosine similarity and apply filter
+        top_k_vectors = query_vector_response.get("vectors", [])
+        top_k_above_threshold = [
+            vector
+            for vector in top_k_vectors
+            if vector.get("distance") is not None
+            and 1 - vector["distance"] >= min_cosine_threshold
+        ]
+        return distance_metric, top_k_above_threshold
+
