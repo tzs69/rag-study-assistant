@@ -21,6 +21,9 @@ def load_documents_for_doc_id(doc_id: str, s3_chunk_store: S3GPChunkStore) -> Di
     for chunk_id, text in chunks.items():
         out[chunk_id] = Document(
             id=chunk_id,
-            page_content=text
+            page_content=text,
+            metadata={
+                "doc_id": doc_id
+            }
         )
     return out
