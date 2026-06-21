@@ -1,6 +1,6 @@
 # Retrieval Pipeline - Backend Notes
 
-This document describes the current retrieval architecture under `backend/src/retrieval`, including hybrid keyword/semantic candidate retrieval, Reciprocal Rank Fusion (RRF), and best-effort cross-encoder reranking.
+This document describes the current retrieval architecture under `backend/src/retrieval`, including hybrid keyword/semantic candidate retrieval, Reciprocal Rank Fusion (RRF), and best-effort cross-encoder reranking. Retrieval produces the ranked chunk context consumed by the chat generation pipeline under `backend/src/chat`.
 
 ## Scope
 
@@ -14,6 +14,7 @@ This document describes the current retrieval architecture under `backend/src/re
   - RRF deduplicates keyword/semantic retrieval results into a single ranked `Document` result list.
   - Cross-encoder reranking is implemented as a best-effort post-RRF step through a separate FastAPI app.
     - Separation due to Cross-Encoder's heavy import dependencies at application start-up time
+  - Final ranked chunks are passed to the chat orchestrator for Bedrock Converse answer generation and SSE streaming.
 
 ## Current Runtime Flow
 
@@ -26,7 +27,7 @@ This document describes the current retrieval architecture under `backend/src/re
 7. `rrf_combine` deduplicates by `chunk_id`, computes RRF scores, and returns the top fused candidates.
 8. If the reranker service is healthy, the orchestrator sends RRF candidates to the cross-encoder reranker.
 9. Reranking failures are logged and the orchestrator falls back to the RRF-ranked candidates.
-10. The final ranked `Document` list is returned to `/chat`.
+10. The final ranked `Document` list is returned to `/chat`, which then passes the same list down to `ChatOrchestrator` for LLM answer generation.
 
 ## Retrieval Components
 
@@ -102,6 +103,9 @@ Relevant settings:
 ## Source-of-Truth Files
 
 - `backend/src/main.py`
+- `backend/src/chat/chat_orchestrator.py`
+- `backend/src/chat/services/message_builder_service.py`
+- `backend/src/chat/services/session_chat_history.py`
 - `backend/src/retrieval/config.py`
 - `backend/src/retrieval/retrieval_orchestrator.py`
 - `backend/src/retrieval/clients/reranker_client.py`

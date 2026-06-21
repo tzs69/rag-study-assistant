@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import type { ChatResponse } from "@/lib/types/chat";
 
 export async function POST(req: Request) {
   try{
@@ -33,14 +32,24 @@ export async function POST(req: Request) {
 				{ ok: false, error: errorMessage }, 
 				{ status: backendRes.status }
 			)
-    }
+    };
 
-    const chatResponse: Partial<ChatResponse> = await backendRes.json()
+    if (!backendRes.body) {
+      return NextResponse.json(
+        { ok: false, error: "Backend chat stream did not return a body" },
+        { status: 502 }
+      )
+    };
 
-    return NextResponse.json(
-      { answer: chatResponse.answer }, 
-      { status: backendRes.status }
-    );
+    return new Response(backendRes.body, {
+      status: backendRes.status,
+      headers: {
+        "Content-Type": backendRes.headers.get("content-type") ?? "text/event-stream",
+        "Cache-Control": backendRes.headers.get("cache-control") ?? "no-cache",
+        "X-Content-Type-Options":
+          backendRes.headers.get("x-content-type-options") ?? "nosniff",
+      },
+    });
 
   } catch (error) {
     const errorMessage =

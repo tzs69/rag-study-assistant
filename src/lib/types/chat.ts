@@ -1,3 +1,5 @@
+
+
 export type ChatRole = "user" | "assistant";
 
 export type ChatMessage = {
@@ -10,7 +12,8 @@ export type ChatRequest = {
   history?: ChatMessage[];
 };
 
-export type ChatResponse = {
-  answer: string;
-  // later: sources?: Source[];
-};
+export type ChatStreamEvent =
+  | { event: "sse_started"; data: Record<string, never> }
+  | { event: "sse_in_progress"; data: { text: string } }
+  | { event: "sse_completed"; data: Record<string, never> }
+  | { event: "sse_error"; data: { error: string } };
