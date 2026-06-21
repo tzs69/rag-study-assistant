@@ -1,17 +1,22 @@
 # backend/src/main.py
+import json
 import logging
 import re
 from contextlib import asynccontextmanager
 from typing import List, Literal, Optional
 
 from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from langchain_core.documents import Document
 from .indexing.services.manifest_repository import ManifestRepository
 from .indexing.services.s3_gp_raw_document_store import S3GPRawDocumentStore
 from .retrieval.retrieval_orchestrator import RetrievalOrchestrator
+from .chat.chat_orchestrator import ChatOrchestrator
 
 from .indexing.config import settings as indexing_settings
 from .retrieval.config import settings as retrieval_settings
+from .chat.config import settings as chat_settings
 from .shared.config import settings as shared_settings
 
 app = FastAPI()
@@ -37,6 +42,10 @@ retrieval_orchestrator = RetrievalOrchestrator(
     collection_term_stats_table_name=shared_settings.DYNAMODB_COLLECTION_TERM_STATS_TABLE_NAME,
     base_english_lexicon_path=retrieval_settings.BASE_ENGLISH_LEXICON_PATH,
     reranker_base_url=retrieval_settings.RERANKER_BASE_URL
+)
+chat_orchestrator = ChatOrchestrator(
+    generator_model_id=chat_settings.GENERATOR_MODEL_ID,
+    temperature=chat_settings.GENERATOR_MODEL_TEMPERATURE
 )
 
 
@@ -129,34 +138,42 @@ class ChatRequest(BaseModel):
     message: str
     history: Optional[List[ChatMessage]] = None
 
-class ChatResponse(BaseModel):
-    answer: str
+def stream_events_sse(
+    user_query: str, 
+    retrieved_chunks_raw: List[Document],
+    max_chunks_to_format: int = 10
+):
+    """
+    SSE streaming helper function.
 
-def _extract_snippet(text: str, query: str, max_chars: int = 280) -> str:
-    query_terms = [t for t in re.findall(r"[a-z0-9]+", query.lower()) if len(t) > 1]
-    if not text:
-        return ""
+    Wraps text chunks yielded from chat orchestrator's stream_answer method
+    as `sse_in_progress` events, and emits `sse_started`, `sse_completed` 
+    or `sse_error` lifecycle events for frontend consumption.
+    """
+    try:
+        yield "event: sse_started\ndata: {}\n\n"
 
-    lowered = text.lower()
-    best_index = -1
-    for term in query_terms:
-        idx = lowered.find(term)
-        if idx != -1 and (best_index == -1 or idx < best_index):
-            best_index = idx
+        for text in chat_orchestrator.stream_answer(
+            user_query=user_query,
+            retrieved_chunks_raw=retrieved_chunks_raw,
+            max_chunks_to_format=max_chunks_to_format
+        ):
+            in_progress_payload = json.dumps({"text": text})
+            yield f"event: sse_in_progress\ndata: {in_progress_payload}\n\n"
 
-    if best_index == -1:
-        snippet = text[:max_chars].strip()
-    else:
-        start = max(0, best_index - max_chars // 3)
-        end = min(len(text), start + max_chars)
-        snippet = text[start:end].strip()
+        yield "event: sse_completed\ndata: {}\n\n"
 
-    if len(snippet) < len(text):
-        return f"{snippet}..."
-    return snippet
+    except Exception:
+        logger.exception("Chat stream failed")
+        error_payload = json.dumps({"error": "Chat stream failed"})
+        yield f"event: sse_error\ndata: {error_payload}\n\n"
 
-@app.post("/chat", response_model=ChatResponse)
+@app.post("/chat")
 def chat(req: ChatRequest):
+    """
+    Handle a user's chat request by retrieving relevant chunks, passing those chunks as 
+    context for LLM answer generation, and streaming the generated answer to client through SSE.
+    """
     try:
         user_query = req.message.strip()
 
@@ -169,46 +186,26 @@ def chat(req: ChatRequest):
             semantic_retrieval_candidates_size=30,
             rrf_candidates_size=20
         )
-        answer_lines: List[str] = []
 
-        if not ranked_chunks:
-            return ChatResponse(answer="I couldn't find relevant content for that query in the indexed documents.")
-
-        if correction_result and correction_result.used_spell_correction:
-            answer_lines.append(
-                f"Spell correction applied: {correction_result.original_query} -> {correction_result.corrected_query} "
-                f"(tokens corrected: {correction_result.num_tokens_corrected})"
-            )
-            answer_lines.append("")
-
-        for rank, document in enumerate(ranked_chunks, start=1):
-            snippet = _extract_snippet(document.page_content, query_for_retrieval)
-            answer_lines.append(f"{rank}) {snippet}")
-
-            metadata = document.metadata
-            rerank_score = metadata.get("rerank_score")
-            keyword_retrieval_rank = metadata.get("keyword_retrieval_rank")
-            semantic_retrieval_rank = metadata.get("semantic_retrieval_rank")
-
-            score_metrics = ""
-            if rerank_score is not None:
-                score_metrics += f"Rerank Score: {round(rerank_score, 5)}"
-            if semantic_retrieval_rank:
-                if score_metrics:
-                    score_metrics += ",  "
-                score_metrics += f"Semantic Retrieval (Vector Cosine Similarity) Ranking: {semantic_retrieval_rank}"
-            if keyword_retrieval_rank:
-                if score_metrics:
-                    score_metrics += ",  "
-                score_metrics += f"Keyword Retrieval (BM25) Ranking: {keyword_retrieval_rank}"
-
-            answer_lines.append(f"[{score_metrics}]")
-            answer_lines.append("")
-
-        return ChatResponse(answer="\n".join(answer_lines))
+        return StreamingResponse(
+            content=stream_events_sse(
+                user_query=query_for_retrieval,
+                retrieved_chunks_raw=ranked_chunks,
+                max_chunks_to_format=10
+            ),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Content-Type-Options": "nosniff",
+            }
+        )
 
     except HTTPException:
         raise
     except Exception:
         logger.exception("Chat request failed")
         raise HTTPException(status_code=500, detail="Chat request failed")
+
+
+class ChatResponse(BaseModel):
+    answer: str

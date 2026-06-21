@@ -48,6 +48,7 @@ def rrf_combine(
                 chunk_tracker[l1_chunk_id]["rrf_score"] += rrf_score
                 chunk_tracker[l1_chunk_id]["priority"] = 2
             chunk_tracker[l1_chunk_id]["keyword_retrieval_rank"] = i + 1
+            chunk_tracker[l1_chunk_id]["metadata"] = dict(l1_chunk.metadata)
 
         # Semantic retrieval results list
         if i <= len(semantic_retrieval_results_list)-1:
@@ -67,6 +68,7 @@ def rrf_combine(
                 chunk_tracker[l2_chunk_id]["rrf_score"] += rrf_score
                 chunk_tracker[l2_chunk_id]["priority"] = 2
             chunk_tracker[l2_chunk_id]["semantic_retrieval_rank"] = i + 1
+            chunk_tracker[l2_chunk_id]["metadata"] = dict(l2_chunk.metadata)
 
     out: List[Tuple[Document, float, int]] = []
 
@@ -77,6 +79,7 @@ def rrf_combine(
 
         keyword_retrieval_rank, semantic_retrieval_rank = metadata.get("keyword_retrieval_rank"), metadata.get("semantic_retrieval_rank")
 
+        source_metadata = metadata.get("metadata", {})
         chunk_metadata = {}
         if keyword_retrieval_rank is not None:
             chunk_metadata["keyword_retrieval_rank"] = keyword_retrieval_rank
@@ -86,7 +89,10 @@ def rrf_combine(
         chunk_doc = Document(
             id=chunk_id,
             page_content=chunk_text,
-            metadata=chunk_metadata
+            metadata={
+                **source_metadata,
+                **chunk_metadata
+            }
         )
         out.append((chunk_doc, rrf_score, priority))
 

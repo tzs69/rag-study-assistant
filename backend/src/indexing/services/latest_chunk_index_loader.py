@@ -75,7 +75,13 @@ def load_chunk_index_from_latest_snapshot(
 
         cleaned_chunk_id = chunk_id.strip()
         cleaned_doc_id = doc_id.strip()
-        documents_by_chunk_id[cleaned_chunk_id] = Document(id=cleaned_chunk_id, page_content=page_content)
+        documents_by_chunk_id[cleaned_chunk_id] = Document(
+            id=cleaned_chunk_id, 
+            page_content=page_content, 
+            metadata = {
+                "doc_id": cleaned_doc_id
+            }
+        )
         doc_chunk_index.setdefault(cleaned_doc_id, set()).add(cleaned_chunk_id)
 
     return InMemoryChunkIndex(

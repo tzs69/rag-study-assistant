@@ -33,13 +33,15 @@ This repository contains:
 - Corpus change tracking plus BM25 snapshot/pointer update pipeline
 - Hybrid retrieval flow with keyword retrieval (BM25), semantic retrieval (S3 Vector cosine similarity), RRF fusion, and best-effort cross-encoder reranking
 - Separate FastAPI cross-encoder reranker service under `backend/src/ce_rerank`
+- Chat answer generation pipeline under `backend/src/chat`
+- Bedrock Converse-based LLM answer generation over retrieved/reranked chunks
+- Server-sent event (SSE) streaming from backend `/chat` through the Next API proxy to the frontend chat UI
 
 ### In Progress / Partial:
-- `/chat` currently returns retrieved/reranked chunk inspection output, not final LLM answer synthesis
 - Error handling and logging are functional but still rudimentary and not yet standardized across UI, API, indexing, and retrieval paths
+- Test coverage is still limited, especially around route contracts, streaming behavior, and AWS-backed pipeline components
 
 ### Planned Next
-- Implement LLM answer generation over retrieved/reranked chunks
 - Improve observability and test coverage across indexing, retrieval, route contracts, and chat generation
 - Add source-aware answer formatting for generated responses
 
@@ -57,12 +59,14 @@ This repository contains:
 - Pydantic + pydantic-settings
 - python-multipart
 - httpx
+- SSE streaming
 
 ### Retrieval / Indexing
 - LangChain ecosystem (`langchain-aws`, `langchain-experimental`, `langchain_community`)
 - `rank_bm25` (keyword retrieval / BM25)
 - Reciprocal Rank Fusion (hybrid keyword/semantic retrieval fusion)
 - `sentence-transformers` CrossEncoder reranker service
+- Bedrock Converse chat generation via `ChatBedrockConverse`
 - `pypdf`, `python-docx` (document text extraction)
 
 ### Infrastructure / Cloud
@@ -83,6 +87,7 @@ This repository contains:
 5. Frontend fetches document list via `/api/documents`.
 6. Chat requests call backend `/chat`, which runs keyword retrieval (BM25) and semantic retrieval in parallel.
 7. Retrieval candidates are deduplicated/fused with RRF, then optionally reranked by the cross-encoder service.
+8. The chat orchestrator builds prompt messages from chat history plus retrieved context and streams generated answer chunks through SSE.
 
 ## Indexing Demo
 

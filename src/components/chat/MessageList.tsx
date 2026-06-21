@@ -8,15 +8,17 @@ import MessageBubble from "./MessageBubble";
 export default function MessageList({
   messages,
   isSending,
+  isStreaming
 }: {
   messages: ChatMessage[];
   isSending: boolean;
+  isStreaming: boolean;
 }) {
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, isSending]);
+  }, [messages, isSending, isStreaming]);
 
   return (
     <Paper
@@ -41,7 +43,7 @@ export default function MessageList({
           </Box>
         ))}
 
-        {isSending ? (
+        {isSending && !isStreaming ? (
           <Box sx={{ display: "flex", justifyContent: "flex-start" }}>
             <MessageBubble message={{ role: "assistant", content: "Thinking…" }} />
           </Box>
