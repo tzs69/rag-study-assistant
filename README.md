@@ -89,9 +89,12 @@ This repository contains:
 7. Retrieval candidates are deduplicated/fused with RRF, then optionally reranked by the cross-encoder service.
 8. The chat orchestrator builds prompt messages from chat history plus retrieved context and streams generated answer chunks through SSE.
 
-## Indexing Demo
+## Full Pipeline Demo (Indexing -> Retrieval -> Answer Generation)
 
-https://github.com/user-attachments/assets/ad8b1e81-bc23-4858-84c2-17be012acbbf
+https://github.com/user-attachments/assets/3c912496-ad49-462a-ac7d-754ff7fb6ed3
+
+
+
 
 
 ## Local Development
