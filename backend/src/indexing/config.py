@@ -8,8 +8,6 @@ ENV_FILE_PATH = Path(__file__).resolve().parent / ".env.local"
 
 class Settings(BaseSettings):
 
-    DYNAMODB_MANIFEST_TABLE_NAME: str
-
     CHUNKING_MODEL_ID: str
 
     SQS_BM25_UPDATE_QUEUE_URL: str

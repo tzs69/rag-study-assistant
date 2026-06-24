@@ -55,7 +55,7 @@ def ingestion_handler(event, context):
 
     # Initialize helper classes
     document_reader = DocumentReaderService(bucket_name=shared_settings.S3_GP_BUCKET_NAME)
-    manifest_repository = ManifestRepository(table_name=indexing_settings.DYNAMODB_MANIFEST_TABLE_NAME)      
+    manifest_repository = ManifestRepository(table_name=shared_settings.DYNAMODB_MANIFEST_TABLE_NAME)      
     chunking_service = SemanticChunkingService(chunking_llm_model_id=indexing_settings.CHUNKING_MODEL_ID)
     chunk_store = S3GPChunkStore(bucket=shared_settings.S3_GP_BUCKET_NAME, chunks_prefix=shared_settings.S3_GP_CHUNK_PREFIX)
     embedding_service = EmbeddingService(embedding_model_id=shared_settings.EMBEDDING_MODEL_ID)

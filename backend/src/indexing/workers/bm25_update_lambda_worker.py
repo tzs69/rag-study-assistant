@@ -7,7 +7,6 @@ from botocore.exceptions import ClientError
 from langchain_community.retrievers import BM25Retriever
 from langchain_core.documents import Document
 
-from ..config import settings as indexing_settings
 from ...shared.config import settings as shared_settings
 from ..services.manifest_repository import ManifestRepository
 from ..services.indexed_documents_loader import load_indexed_documents
@@ -120,7 +119,7 @@ def bm25_update_handler(event, context):
         target_version = max(event_payload["corpus_version"] for event_payload in valid_events)
         coalesced_event_count = len(_coalesce_by_doc_latest(valid_events))
 
-        manifest_repository = ManifestRepository(table_name=indexing_settings.DYNAMODB_MANIFEST_TABLE_NAME)
+        manifest_repository = ManifestRepository(table_name=shared_settings.DYNAMODB_MANIFEST_TABLE_NAME)
         base_store = BaseStore(bucket=shared_settings.S3_GP_BUCKET_NAME, vectors=False)
         chunk_store = S3GPChunkStore(bucket=shared_settings.S3_GP_BUCKET_NAME, chunks_prefix=shared_settings.S3_GP_CHUNK_PREFIX)
         corpus_monitor = CorpusMonitor(table_name=shared_settings.DYNAMODB_CORPUS_CHANGE_TABLE_NAME)

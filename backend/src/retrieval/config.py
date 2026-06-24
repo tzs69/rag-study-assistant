@@ -9,9 +9,6 @@ ENV_FILE_PATH = Path(__file__).resolve().parent / ".env.local"
 
 class Settings(BaseSettings):
 
-    # Retrieval model settings
-    RETRIEVAL_MODEL_ID: str
-
     # BM25 snapshot polling setting
     BM25_POLL_INTERVAL_SECONDS: int = 5
 
