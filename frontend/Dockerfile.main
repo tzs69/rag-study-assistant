@@ -1,0 +1,29 @@
+# 1) Download dependencies
+FROM node:22-alpine AS dependencies
+WORKDIR /frontend-app
+COPY package.json package-lock.json ./
+RUN npm ci
+
+# 2) Build frontend app
+FROM node:22-alpine AS builder
+WORKDIR /frontend-app
+# All dependency files from 1)
+COPY --from=dependencies /frontend-app/node_modules ./node_modules
+# Frontend source code
+COPY ./src/ ./src/
+# Config files required by Next.js build
+COPY package.json package-lock.json next.config.ts tsconfig.json postcss.config.mjs eslint.config.mjs ./
+RUN npm run build
+
+# 3) Run built app server
+FROM node:22-alpine AS runner
+WORKDIR /frontend-app
+# Configure the server listening host and port
+ENV HOSTNAME=0.0.0.0
+ENV PORT=3000
+# Copy standalone server output of previous phase into current phase root level
+COPY --from=builder /frontend-app/.next/standalone ./
+# Copy static assets into .next/
+COPY --from=builder /frontend-app/.next/static ./.next/static
+EXPOSE 3000
+CMD ["node", "server.js"]
