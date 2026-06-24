@@ -1,0 +1,14 @@
+fastapi
+uvicorn
+python-multipart
+
+boto3
+pydantic
+pydantic-settings
+langchain-core
+langchain-community
+langchain-aws
+rank_bm25
+nltk
+python-Levenshtein
+httpx
