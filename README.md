@@ -3,7 +3,7 @@
 A study assistant app that lets users upload source documents, index them for retrieval, and chat against the indexed knowledge base.
 
 This repository contains:
-- a Next.js frontend (`src/`)
+- a Next.js frontend (`frontend/src/`)
 - a FastAPI backend (`backend/src/`)
 - AWS SAM infrastructure for event-driven indexing/deletion (`infra/`)
 
@@ -22,7 +22,7 @@ This repository contains:
   - list documents with indexing status
   - upload documents
   - delete indexed documents
-- Frontend Chat page and Next API proxy routes under `src/app/api/**` for backend communication
+- Frontend Chat page and Next API proxy routes under `frontend/src/app/api/**` for backend communication
 - Backend upload/list/delete/chat endpoints in `backend/src/main.py`
 - Backend document listing with per-document indexing status
 - Backend delete guard that blocks deletion until a document is indexed
@@ -105,6 +105,7 @@ https://github.com/user-attachments/assets/ad8b1e81-bc23-4858-84c2-17be012acbbf
 From repo root:
 
 ```bash
+cd frontend
 npm install
 npm run dev
 ```
