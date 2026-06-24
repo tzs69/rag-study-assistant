@@ -15,4 +15,5 @@ COPY ./src/ce_rerank ./src/ce_rerank
 # Reranker port 8080
 EXPOSE 8080
 
-CMD ["uvicorn", "src.ce_rerank.main:app", "--host", "0.0.0.0", "--port", "8080"]
+# --reload for dev environment
+CMD ["uvicorn", "src.ce_rerank.main:app", "--host", "0.0.0.0", "--port", "8080", "--reload"]
