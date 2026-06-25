@@ -1,7 +1,7 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
 # dependencies
-/node_modules
+frontend/node_modules
 /.pnp
 .pnp.*
 .yarn/*
@@ -14,8 +14,8 @@
 /coverage
 
 # next.js
-/.next/
-/out/
+frontend/.next/
+frontend/out/
 
 # production
 /build
@@ -31,30 +31,27 @@ yarn-error.log*
 .pnpm-debug.log*
 
 # env files (can opt-in for committing if needed)
-.env*
+.env
+.env.*
+*.env
+*.env.*
+!*.env.example
+!**/.env.example
 
 # vercel
 .vercel
 
 # typescript
 *.tsbuildinfo
-next-env.d.ts
+*.d.ts
 
 # compiled code files (.pyc, .pyd, .pyo etc)
 *.py[cod]
-
-# typescript declaration files
-*.d.ts
 
 # aws sam build artifacts and sam config file (not example)
 .aws-sam/
 infra/.aws-sam/
 infra/samconfig.toml
-
-# built db artifacts
-backend/data/**/*.db
-backend/data/**/*.db-wal
-backend/data/**/*.db-shm
 
 # Jupyter notebook sandbox testing file
 testing.ipynb

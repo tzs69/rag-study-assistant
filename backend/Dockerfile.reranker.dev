@@ -1,0 +1,19 @@
+FROM python:3.12-slim
+
+WORKDIR /reranker-app
+
+# IMPORTANT: install lightweight CPU version of pytorch first 
+# so sentence-transformers package uses it instead of heavier CUDA default version
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+
+COPY requirements-reranker.txt .
+RUN pip install --no-cache-dir -r requirements-reranker.txt
+
+# Copy ONLY reranker app code
+COPY ./src/ce_rerank ./src/ce_rerank
+
+# Reranker port 8080
+EXPOSE 8080
+
+# --reload for dev environment
+CMD ["uvicorn", "src.ce_rerank.main:app", "--host", "0.0.0.0", "--port", "8080", "--reload"]

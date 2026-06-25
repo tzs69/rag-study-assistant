@@ -1,0 +1,48 @@
+# IMPORTANT: Ensure all relevant Dockerfiles built before compose
+# Dev environment: Include bind mounts for each service
+
+name: rag-study-assistant
+
+services:
+  frontend-main:
+    image: frontend-main-app-dev:latest
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.main.dev
+    ports:
+      - "3000:3000"
+    env_file:
+      - ./frontend/.env
+    volumes:
+      - ./frontend:/frontend-app
+      - frontend_node_modules:/frontend-app/node_modules
+      - frontend_next:/frontend-app/.next
+    depends_on:
+      - backend-main
+
+  backend-main:
+    image: backend-main-app-dev:latest
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.main.dev
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./backend/.env
+    volumes:
+      - ${USERPROFILE}/.aws:/root/.aws
+      - ./backend/src:/backend-main/src
+
+  backend-reranker:
+    image: backend-reranker-app-dev:latest
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.reranker.dev
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./backend/src/ce_rerank:/reranker-app/src/ce_rerank
+
+volumes:
+  frontend_node_modules:
+  frontend_next:

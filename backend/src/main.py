@@ -14,7 +14,6 @@ from .indexing.services.s3_gp_raw_document_store import S3GPRawDocumentStore
 from .retrieval.retrieval_orchestrator import RetrievalOrchestrator
 from .chat.chat_orchestrator import ChatOrchestrator
 
-from .indexing.config import settings as indexing_settings
 from .retrieval.config import settings as retrieval_settings
 from .chat.config import settings as chat_settings
 from .shared.config import settings as shared_settings
@@ -25,9 +24,9 @@ raw_doc_store = S3GPRawDocumentStore(
     bucket=shared_settings.S3_GP_BUCKET_NAME,
     raw_prefix=shared_settings.S3_GP_RAW_PREFIX,
 )
-manifest_repository = ManifestRepository(table_name=indexing_settings.DYNAMODB_MANIFEST_TABLE_NAME)
+manifest_repository = ManifestRepository(table_name=shared_settings.DYNAMODB_MANIFEST_TABLE_NAME)
 retrieval_orchestrator = RetrievalOrchestrator(
-    manifest_table_name=indexing_settings.DYNAMODB_MANIFEST_TABLE_NAME,
+    manifest_table_name=shared_settings.DYNAMODB_MANIFEST_TABLE_NAME,
     corpus_change_table_name=shared_settings.DYNAMODB_CORPUS_CHANGE_TABLE_NAME,
     s3_gp_bucket_name=shared_settings.S3_GP_BUCKET_NAME,
     chunks_prefix=shared_settings.S3_GP_CHUNK_PREFIX,

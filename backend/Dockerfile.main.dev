@@ -1,0 +1,20 @@
+FROM python:3.12-slim
+
+WORKDIR /backend-main
+
+COPY requirements-main.txt .
+
+RUN pip install --no-cache-dir -r requirements-main.txt
+
+# Copy all backend source code except for reranker
+COPY ./src/main.py ./src/main.py
+COPY ./src/chat ./src/chat
+COPY ./src/retrieval ./src/retrieval
+COPY ./src/shared ./src/shared
+COPY ./src/indexing ./src/indexing
+
+# Document that the application listens on port 8000.
+EXPOSE 8000
+
+# --reload for dev environment
+CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

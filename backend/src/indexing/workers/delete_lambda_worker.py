@@ -4,7 +4,6 @@ import logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 from urllib.parse import unquote_plus
-from ..services.s3_gp_raw_document_store import S3GPRawDocumentStore
 from ..services.manifest_repository import ManifestRepository
 from ...shared.services.s3_gp_chunk_store import S3GPChunkStore
 from ...shared.services.s3_vector_store import S3VectorStore
@@ -48,8 +47,7 @@ def deletion_handler(event, context):
     )
 
     # Initialize helper classes
-    raw_doc_store = S3GPRawDocumentStore(bucket=shared_settings.S3_GP_BUCKET_NAME, raw_prefix=shared_settings.S3_GP_RAW_PREFIX)
-    manifest_repository = ManifestRepository(table_name=indexing_settings.DYNAMODB_MANIFEST_TABLE_NAME)      
+    manifest_repository = ManifestRepository(table_name=shared_settings.DYNAMODB_MANIFEST_TABLE_NAME)      
     chunk_store = S3GPChunkStore(bucket=shared_settings.S3_GP_BUCKET_NAME, chunks_prefix=shared_settings.S3_GP_CHUNK_PREFIX)
     vector_store = S3VectorStore(bucket=shared_settings.S3_VECTOR_BUCKET_NAME, vector_index=shared_settings.S3_VECTOR_INDEX_NAME, read_only=False)
     corpus_change_table = CorpusChangeTable(table_name=shared_settings.DYNAMODB_CORPUS_CHANGE_TABLE_NAME)

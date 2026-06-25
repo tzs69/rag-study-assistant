@@ -9,9 +9,6 @@ ENV_FILE_PATH = Path(__file__).resolve().parent / ".env.local"
 
 class Settings(BaseSettings):
 
-    # Retrieval model settings (optional until wired)
-    RETRIEVAL_MODEL_ID: Optional[str] = None
-
     # BM25 snapshot polling setting
     BM25_POLL_INTERVAL_SECONDS: int = 5
 
@@ -19,7 +16,7 @@ class Settings(BaseSettings):
     ENABLE_SPELL_CORRECTION: bool = False
 
     # Minimum cosine similarity score threshold for semantic search candidate filtering
-    MIN_COSINE_THRESHOLD: float = None
+    MIN_COSINE_THRESHOLD: float = 0.30
 
     BASE_ENGLISH_LEXICON_PATH: str = "src/retrieval/data/base_english_lexicon.json"
 
@@ -30,9 +27,4 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-
-# Local dev requires .env.local; Lambda/runtime can inject env vars.
-if not ENV_FILE_PATH.is_file():
-    raise FileNotFoundError(f"Missing required env file: {ENV_FILE_PATH}")
-
-settings = Settings(_env_file=ENV_FILE_PATH)
+settings = Settings(_env_file=ENV_FILE_PATH if ENV_FILE_PATH.is_file() else None)

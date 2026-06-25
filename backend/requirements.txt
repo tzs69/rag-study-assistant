@@ -1,9 +1,7 @@
+# Requirements file for lambda packaging of indexing worker dependencies ONLY
 boto3
 pydantic
 pydantic-settings
-fastapi
-python-multipart
-numpy
 pypdf
 python-docx
 langchain-core
@@ -12,8 +10,4 @@ langchain-experimental
 langchain-text-splitters
 langchain-aws
 rank_bm25
-uvicorn
-python-Levenshtein
 nltk
-httpx
-sentence-transformers
