@@ -1,14 +1,20 @@
 # Infra (AWS SAM)
 
-This folder contains the AWS infrastructure (SAM/CloudFormation) for the backend event-driven ingestion/deletion pipeline.
+## Scope
 
-## Current Scope (SAM-managed)
+This folder contains the AWS infrastructure (SAM/CloudFormation) for the backend event-driven indexing lifecycle.
+
+It does not directly provision the frontend UI or retrieval-related application service runtimes, which are containerized for local/dev with Docker Compose at the repo root. However, the AWS resources provisioned here are still required by those application services at runtime.
+
+<br/>
+
+## Provisioned Resources
 
 - General purpose S3 bucket for raw docs / chunk artifacts
 - S3 bucket notifications (`ObjectCreated:*`, `ObjectRemoved:*`) -> SQS
-- Ingestion + deletion SQS queues and DLQs
+- Ingestion, deletion, and BM25 update SQS queues and DLQs
 - Queue policies allowing S3 to publish to SQS
-- Lambda ingestion worker + deletion worker
+- Lambda ingestion worker, deletion worker, and BM25 update worker
 - Lambda event source mappings (SQS -> Lambda)
 - DynamoDB manifest table (`doc_id` keyed)
 - DynamoDB corpus change table (`pk + change_id` keyed change stream)
@@ -18,21 +24,43 @@ This folder contains the AWS infrastructure (SAM/CloudFormation) for the backend
 - S3 Vectors vector bucket + vector index
 - IAM policies for S3 / SQS / DynamoDB / Bedrock / S3 Vectors worker access
 
-## Handler Entrypoints
+<br/>
 
-The template currently deploys these handlers:
 
-- `backend/src/indexing/workers/ingest_lambda_worker.py` -> `ingestion_handler`
-- `backend/src/indexing/workers/delete_lambda_worker.py` -> `deletion_handler`
+## Lambda Worker Sources
 
-In SAM:
+| SAM function | Source file |
+| --- | --- |
+| `IngestionFunction` | `backend/src/indexing/workers/ingest_lambda_worker.py` |
+| `DeletionFunction` | `backend/src/indexing/workers/delete_lambda_worker.py` |
+| `BM25UpdateFunction` | `backend/src/indexing/workers/bm25_update_lambda_worker.py` |
 
-- `IngestionFunction` handler: `indexing.workers.ingest_lambda_worker.ingestion_handler`
-- `DeletionFunction` handler: `indexing.workers.delete_lambda_worker.deletion_handler`
+<br/>
+
+## Lambda Environment Variables
+
+SAM injects app runtime env vars into both Lambda workers, including:
+
+- `S3_GP_BUCKET_NAME`
+- `S3_GP_RAW_PREFIX`
+- `S3_GP_CHUNK_PREFIX`
+- `S3_VECTOR_BUCKET_NAME`
+- `S3_VECTOR_INDEX_NAME`
+- `DYNAMODB_MANIFEST_TABLE_NAME`
+- `DYNAMODB_CORPUS_CHANGE_TABLE_NAME`
+- `DYNAMODB_COLLECTION_TERM_STATS_TABLE_NAME`
+- `DYNAMODB_DOC_TERM_STATS_TABLE_NAME`
+- `CHUNKING_MODEL_ID`
+- `EMBEDDING_MODEL_ID`
+- `SQS_BM25_UPDATE_QUEUE_URL`
+- `BM25_POINTER_KEY`
+- `BM25_SNAPSHOT_KEY`
+
+<br/>
 
 ## Naming Convention
 
-Most resource names are created as:
+Inside template file, most resource names are created as:
 
 `<ProjectName>-<EnvironmentName>-<SuffixName>`
 
@@ -45,31 +73,7 @@ Examples:
 
 Because of this, `samconfig.toml` stores **suffix/base** values (for example `document-upload-sam`), not already-prefixed full names.
 
-## Lambda Environment Variables (current)
-
-SAM injects app runtime env vars into both Lambda workers, including:
-
-- `S3_GP_BUCKET_NAME` (actual created GP bucket name)
-- `S3_GP_RAW_PREFIX`
-- `S3_GP_CHUNK_PREFIX`
-- `S3_VECTOR_BUCKET_NAME` (actual created vector bucket name)
-- `S3_VECTOR_INDEX_NAME` (actual created vector index name)
-- `DYNAMODB_MANIFEST_TABLE_NAME` (actual created DynamoDB table name)
-- `DYNAMODB_CORPUS_CHANGE_TABLE_NAME` (actual created DynamoDB table name)
-- `DYNAMODB_COLLECTION_TERM_STATS_TABLE_NAME` (actual created DynamoDB table name)
-- `DYNAMODB_DOC_TERM_STATS_TABLE_NAME` (actual created DynamoDB table name)
-- `CHUNKING_MODEL_ID`
-- `EMBEDDING_MODEL_ID`
-
-## Event Flow (implemented infra)
-
-1. App uploads a raw document to the GP S3 bucket under `raws/`
-2. S3 emits `ObjectCreated:*`
-3. S3 sends notification to ingestion SQS queue
-4. Ingestion Lambda is invoked via SQS event source mapping
-5. Ingestion handler processes document -> chunk -> embed -> upsert vectors -> update manifest -> append corpus change record
-6. On delete (`ObjectRemoved:*`), S3 sends event to deletion queue
-7. Deletion handler performs cleanup (manifest + vectors/chunks) and appends corpus change record
+<br/>
 
 ## Local Workflow (Windows / SAM)
 
@@ -108,9 +112,15 @@ Notes:
 - If PowerShell blocks folder removal due to lock/permissions, close any process using `.aws-sam/` and retry.
 - Replace `<aws-profile>` and `<absolute-path-to>` with values from your local environment.
 
-## Notes / Remaining Work
+<br/>
 
-- Keep `infra/env/dev-params.example.txt` in sync whenever template parameter names change.
-- Keep `samconfig.toml` aligned with current deploy flags/profile and template path usage.
+## Additional Notes
+
 - If stack replacement is needed, clean up stack-associated managed artifact bucket in CloudFormation before redeploy.
 - For destructive teardown behavior, ensure S3/vector resources are empty before stack deletion.
+
+<br/>
+
+## Source-of-Truth Files
+
+- `infra/template.yaml`
